@@ -16,6 +16,7 @@ def create_constructor():
     driver = TestTypeGenerator(prelude)
     return (driver.ctor, prelude)
 
+
 def match_construct(ty):
     if isinstance(ty, relay.TensorType):
         return TC.TENSOR

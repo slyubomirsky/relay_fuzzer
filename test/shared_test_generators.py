@@ -1,5 +1,5 @@
 """
-Basic generators that the tests will use to ensure the componenets work
+Basic generators that the tests will use to ensure the components work
 """
 import random
 from type_constructor import TypeConstructs as TC
