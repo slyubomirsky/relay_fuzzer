@@ -175,12 +175,13 @@ def test_partially_instantiate_map():
     map_ty = m.checked_type
     concrete_list = l(relay.TupleType([]))
 
-    ft = type_utils.partially_instantiate_func(map_ty, concrete_list)
+    success, ft = type_utils.partially_instantiate_func(map_ty, concrete_list)
     a = relay.TypeVar("a")
     expected_ft = relay.FuncType(
         [relay.FuncType([a], relay.TupleType([])), l(a)],
         concrete_list,
         type_params=[a])
+    assert success
     assert ft == expected_ft
 
 

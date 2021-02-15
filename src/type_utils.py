@@ -173,14 +173,17 @@ def get_instantiated_constructors(prelude, type_call):
 def partially_instantiate_func(ft, ret_type):
     """
     Given a function type (potentially with type params) and a concrete
-    return type, instantiate the function type as much as possible
+    return type,
+    return (success, function type)
+    where success is true if they can be unified and false if the they cannot.
+    The returned function type will be instantiated as much as possible.
     """
     # remove type params if present
     strip_ft = relay.FuncType(ft.arg_types, ft.ret_type)
     success, mapping = attempt_unify(ret_type, strip_ft.ret_type)
     if not success:
-        raise ValueError(f"Type {ret_type} does not match return type of {ft}")
+        return False, None
 
     new_ft = instantiate(strip_ft, mapping)
     remaining_vars = all_type_vars(new_ft)
-    return relay.FuncType(new_ft.arg_types, new_ft.ret_type, type_params=remaining_vars)
+    return True, relay.FuncType(new_ft.arg_types, new_ft.ret_type, type_params=remaining_vars)
