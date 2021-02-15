@@ -7,6 +7,8 @@ import tvm
 from tvm import relay
 from tvm.relay.analysis import all_vars
 
+from type_generator import TypeConstructs as TC
+
 class ExprConstructor:
     def __init__(self, var_scope, generate_expr, generate_type,
                  generate_ctor, generate_patterns, generate_op):
@@ -73,7 +75,7 @@ class ExprConstructor:
         # and tuple[idx] must be of the ret type
         constrained = {idx: ret_type}
         tup_type = self.generate_type(gen_params={
-            "tuple": {
+            TC.TUPLE: {
                 "min_arity": idx+1,
                 "constrained": constrained
             }
@@ -93,7 +95,11 @@ class ExprConstructor:
         return relay.If(cond_expr, true_branch, false_branch)
 
     def construct_function_call(self, ret_type):
-        func_type = self.generate_type(gen_params={"func": {"ret_type": ret_type}})
+        func_type = self.generate_type(gen_params={
+            TC.FUNC: {
+                "ret_type": ret_type
+            }
+        })
         assert isinstance(func_ty, relay.FuncType)
         func_expr = self.generate_expr(func_type)
         arg_exprs = [self.generate_expr(arg_types) for arg_types in func_ty.arg_types]
@@ -102,8 +108,8 @@ class ExprConstructor:
     def construct_match(self, ret_type):
         # matching only defined on tuples and ADTs
         match_type = self.generate_type(gen_params={
-            "tuple": {},
-            "adt": {}
+            TC.TUPLE: {},
+            TC.ADT: {}
         })
         match_val = self.generate_expr(match_type)
         match_patterns = self.generate_patterns(match_type)
@@ -121,7 +127,7 @@ class ExprConstructor:
 
     def construct_ref_write(self):
         # ref writes are always of type (), so there is no type param
-        ref_type = self.generate_type(gen_params={"ref": {}})
+        ref_type = self.generate_type(gen_params={TC.REF: {}})
         assert isinstance(ref_ty, relay.RefType)
         ref_expr = self.generate_expr(ref_type)
         inner_type = ref_ty.value
@@ -129,11 +135,7 @@ class ExprConstructor:
         return relay.RefWrite(ref_expr, assign_expr)
 
     def construct_ref_read(self, ret_type):
-        ref_type = self.generate_type(gen_params={
-            "ref": {"value": ret_type}
-        })
-        assert isinstance(ref_ty, relay.RefType)
-        ref_expr = self.generate_expr(ref_type)
+        ref_expr = self.generate_expr(relay.RefType(ret_type))
         return relay.RefRead(ref_expr)
 
     def construct_op_call(self, ret_type):
