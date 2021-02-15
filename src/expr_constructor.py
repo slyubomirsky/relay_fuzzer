@@ -7,7 +7,7 @@ import tvm
 from tvm import relay
 from tvm.relay.analysis import all_vars
 
-from type_generator import TypeConstructs as TC
+from type_constructor import TypeConstructs as TC
 
 class ExprConstructor:
     def __init__(self, var_scope, generate_expr, generate_type,

@@ -1,9 +1,6 @@
 """
 Parameterized generator for types, also intended to
-separate decision-making policy from generating types,
-though it's kept separate from the ExprConstructor
-in that the ExprConstructor must build expressions to meet a type,
-whereas the type generator is much less constrained
+separate decision-making policy from generating types.
 """
 from enum import Enum, auto, unique
 import random
@@ -12,8 +9,6 @@ import tvm
 from tvm import relay
 
 from type_utils import instantiate
-
-# TODO: create a config class we can use
 
 @unique
 class TypeConstructs(Enum):
@@ -29,11 +24,39 @@ DEFAULT_GEN_PARAMS = {
     for construct in DEFAULT_CONSTRUCTS
 }
 
-class TypeGenerator:
+def params_met(ty, params):
+    """
+    Given the generation params, checks that they have been met for a concrete type.
+    (Provided as a single source of truth.)
+    """
+    if isinstance(ty, (relay.TensorType, relay.RefType,
+                       relay.TypeCall)):
+        # no supported construction constraints
+        return True
+    if isinstance(ty, relay.FuncType):
+        if "ret_type" in params:
+            return ty.ft == params["ret_type"]
+        return True
+    if isinstance(ty, relay.TupleType):
+        if "min_arity" in params:
+            if len(ty.fields) < min_arity:
+                return False
+        if "constrained" in params:
+            for idx, inner_ty in params["constrained"].items():
+                if idx >= len(ty.fields):
+                    return False
+                if ty.fields[idx] != inner_ty:
+                    return False
+        return True
+    raise InputError("Unsupported type")
+
+
+class TypeConstructor:
     def __init__(self, prelude,
                  choose_construct,
                  choose_func_arity, choose_tuple_arity, choose_adt_handle,
-                 generate_dtype, generate_shape):
+                 generate_dtype, generate_shape,
+                 generate_type=None):
         self.p = prelude
         self.choose_construct = choose_construct
         self.choose_tuple_arity = choose_tuple_arity
@@ -41,6 +64,11 @@ class TypeGenerator:
         self.choose_adt_handle = choose_adt_handle
         self.generate_dtype = generate_dtype
         self.generate_shape = generate_shape
+        # no generate type: naive recursion
+        if generate_type is None:
+            self.generate_type = self.construct_type
+        else:
+            self.generate_type = generate_type
 
     def adt_type_vars(self, adt_handle):
         td = self.p.mod[adt_handle]
@@ -54,20 +82,20 @@ class TypeGenerator:
 
     def dispatch_by_construct(self, construct, params):
         if construct == TypeConstructs.TENSOR:
-            return self.generate_tensor_type(params)
+            return self.construct_tensor_type(params)
         if construct == TypeConstructs.TUPLE:
-            return self.generate_tuple_type(params)
+            return self.construct_tuple_type(params)
         if construct == TypeConstructs.REF:
-            return self.generate_ref_type(params)
+            return self.construct_ref_type(params)
         if construct == TypeConstructs.ADT:
-            return self.generate_adt(params)
+            return self.construct_adt(params)
         if construct == TypeConstructs.FUNC:
-            return self.generate_func_type(params)
+            return self.construct_func_type(params)
         raise ValueError(f"Invalid construct {construct}")
 
-    def generate_type(self, gen_params=None):
+    def construct_type(self, gen_params=None):
         """
-        Entry method: Generates a type at random,
+        Entry method: Constructs a type,
         with optional paremeters to specify.
 
         Parameters format:
@@ -88,12 +116,12 @@ class TypeGenerator:
         construct_params = params[construct]
         return self.dispatch_by_construct(construct, construct_params)
 
-    def generate_tensor_type(self, _):
+    def construct_tensor_type(self, _):
         dtype = self.generate_dtype()
         shape = self.generate_shape()
         return relay.TensorType(shape, dtype)
 
-    def generate_tuple_type(self, params):
+    def construct_tuple_type(self, params):
         min_arity = 0
         if "min_arity" in params:
             min_arity = params["min_arity"]
@@ -115,10 +143,10 @@ class TypeGenerator:
             fields[i] = self.generate_type()
         return relay.TupleType(fields)
 
-    def generate_ref_type(self, _):
+    def construct_ref_type(self, _):
         return relay.RefType(self.generate_type())
 
-    def generate_func_type(self, params):
+    def construct_func_type(self, params):
         if "ret_type" in params:
             ret_type = params["ret_type"]
             assert isinstance(ret_type, relay.Type)
@@ -129,7 +157,7 @@ class TypeGenerator:
         arg_types = [self.generate_type() for i in range(arity)]
         return relay.FuncType(arg_types, ret_type)
 
-    def generate_adt(self, _):
+    def construct_adt(self, _):
         adt_handle = self.choose_adt_handle(self.supported_adts())
         type_vars = self.adt_type_vars(adt_handle)
         base_call = relay.TypeCall(adt_handle, type_vars)
