@@ -123,6 +123,12 @@ class TestPatternGenerator(FuelDriver):
     def choose_ctor(self, input_type):
         assert isinstance(input_type, relay.TypeCall)
         ctors = get_instantiated_constructors(self.p, input_type)
+        # if there is an argument-free constructor, choose it now
+        self.decrease_fuel()
+        if self.fuel == 0:
+            for ctor, ft in ctors:
+                if len(ft.arg_types) == 0:
+                    return ctor, ft
         return random.choice(ctors)
 
 
@@ -161,7 +167,10 @@ class TestExprGenerator(FuelDriver):
         return TestTypeGenerator(self.prelude).ctor.construct_type(gen_params=gen_params)
 
     def choose_ctor(self, type_call):
-        return TestPatternGenerator(self.var_scope, self.prelude).choose_ctor(type_call)
+        # passing our fuel here because there is the potential
+        # for constructing infinitely deep ADT literals
+        # if we don't force termination this way
+        return TestPatternGenerator(self.var_scope, self.prelude, fuel=self.fuel).choose_ctor(type_call)
 
     def generate_patterns(self, ty):
         return TestPatternGenerator(self.var_scope, self.prelude).generate_patterns(ty)

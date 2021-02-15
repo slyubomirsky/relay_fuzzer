@@ -31,10 +31,15 @@ def generate_expr(prelude, ty):
 # we should try finer-grained tests than only this
 def test_fuzz():
     prelude = relay.prelude.Prelude()
+    import time
+
     for i in range(NUM_ATTEMPTS):
+        start = time.time()
         ty = generate_type(prelude)
         expr = generate_expr(prelude, ty)
         check_well_formed(prelude, expr, ty)
+        end = time.time()
+        print(f"Iter time: {end - start}")
 
 
 if __name__ == "__main__":
