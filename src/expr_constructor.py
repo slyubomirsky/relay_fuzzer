@@ -154,19 +154,15 @@ class ExprConstructor:
 
 # handle pattern generation
 class PatternConstructor:
-    def __init__(self, var_scope, generate_pattern, generate_ctor):
+    def __init__(self, var_scope, generate_pattern, choose_ctor):
         """
         var_scope: For generating pattern vars
         generate_pattern: Given a type, generates a pattern that matches that type
-        generate_ctor: Given an ADT handle, returns a constructor for it
+        choose_ctor: Given an ADT handle, returns a constructor for it
         """
         self.var_scope = var_scope
         self.generate_pattern = generate_pattern
-        self.generate_ctor = generate_ctor
-
-    def construct_wildcard(self):
-        # trivial but here for consistency
-        return relay.PatternWildcard()
+        self.choose_ctor = choose_ctor
 
     def construct_var_pattern(self, var_type):
         fresh_var = self.var_scope.new_local_var(var_type, add_to_scope=False)
@@ -177,7 +173,7 @@ class PatternConstructor:
         return relay.PatternTuple(nested_patterns)
 
     def construct_ctor_pattern(self, type_call):
-        ctor, instantiated_type = self.generate_ctor(type_call)
+        ctor, instantiated_type = self.choose_ctor(type_call)
         nested_patterns = [self.generate_pattern(input_type)
                            for input_type in instantiated_type.arg_types]
         return relay.PatternConstructor(ctor, nested_patterns)
