@@ -136,6 +136,23 @@ def attempt_unify(concrete, test):
     return True, ret
 
 
+def instantiate_constructor(prelude, constructor, type_call):
+    """
+    Given a specific type call and a constructor,
+    produce a function type for that constructor
+    given that instantiation of the type call
+    """
+    func = type_call.func
+    assert constructor.belong_to == func
+    td = prelude.mod[func]
+    ft = relay.FuncType(constructor.inputs, type_call)
+    instantiation_list = [
+        (td.type_vars[i], type_call.args[i])
+        for i in range(len(td.type_vars))
+    ]
+    return instantiate(ft, instantiation_list)
+
+
 def get_instantiated_constructors(prelude, type_call):
     """
     Given a type call, looks up the ADT in the prelude
@@ -147,19 +164,10 @@ def get_instantiated_constructors(prelude, type_call):
     td = prelude.mod[func]
     type_vars = td.type_vars
     constructors = td.constructors
-
-    assert len(type_call.args) == len(type_vars)
-    instantiation_list = [
-        (type_vars[i], type_call.args[i])
-        for i in range(len(type_vars))
+    return [
+        (ctor, instantiate_constructor(prelude, ctor, type_call))
+        for ctor in constructors
     ]
-    ret = []
-    for ctor in constructors:
-        instantiated = instantiate(
-            relay.FuncType(ctor.inputs, type_call),
-            instantiation_list)
-        ret.append((ctor, instantiated))
-    return ret
 
 
 def partially_instantiate_func(ft, ret_type):
