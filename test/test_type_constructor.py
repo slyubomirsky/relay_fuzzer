@@ -4,7 +4,7 @@ import random
 import tvm
 from tvm import relay
 
-from type_constructor import TypeConstructor
+from type_constructor import TypeConstructor, params_met
 from type_constructor import TypeConstructs as TC
 
 MAX_DIM = 5
@@ -121,13 +121,15 @@ def test_specify_func_ret_type():
     for i in range(CATEGORY_ATTEMPTS):
         ctor, _ = create_constructor()
         ret_type = ctor.construct_type()
-        ft = ctor.construct_type(gen_params={
+        gen_params = {
             TC.FUNC: {
                 "ret_type": ret_type
             }
-        })
+        }
+        ft = ctor.construct_type(gen_params=gen_params)
         assert isinstance(ft, relay.FuncType)
         assert ft.ret_type == ret_type
+        assert params_met(ft, gen_params)
 
 
 def test_constrain_tuple():
@@ -140,12 +142,14 @@ def test_constrain_tuple():
             0: first_ty,
             2: second_ty
         }
-        tt = ctor.construct_type({
+        gen_params = {
             TC.TUPLE: {
                 "min_arity": min_arity,
                 "constrained": constraints
             }
-        })
+        }
+        tt = ctor.construct_type(gen_params=gen_params)
+        assert params_met(tt, gen_params)
         assert isinstance(tt, relay.TupleType)
         assert len(tt.fields) >= min_arity
         assert tt.fields[0] == first_ty

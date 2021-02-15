@@ -18,6 +18,8 @@ class TypeConstructs(Enum):
     ADT = auto()
     FUNC = auto()
 
+TC = TypeConstructs
+
 DEFAULT_CONSTRUCTS = tuple([c for c in TypeConstructs])
 DEFAULT_GEN_PARAMS = {
     construct : {}
@@ -29,20 +31,30 @@ def params_met(ty, params):
     Given the generation params, checks that they have been met for a concrete type.
     (Provided as a single source of truth.)
     """
-    if isinstance(ty, (relay.TensorType, relay.RefType,
-                       relay.TypeCall)):
-        # no supported construction constraints
+    if params is None:
         return True
+    if isinstance(ty, relay.TensorType):
+        return TC.TENSOR in params
+    if isinstance(ty, relay.RefType):
+        return TC.REF in params
+    if isinstance(ty, relay.TypeCall):
+        return TC.ADT in params
     if isinstance(ty, relay.FuncType):
-        if "ret_type" in params:
-            return ty.ft == params["ret_type"]
+        if TC.FUNC not in params:
+            return False
+        f_params = params[TC.FUNC]
+        if "ret_type" in f_params:
+            return ty.ret_type == f_params["ret_type"]
         return True
     if isinstance(ty, relay.TupleType):
-        if "min_arity" in params:
-            if len(ty.fields) < min_arity:
+        if TC.TUPLE not in params:
+            return False
+        t_params = params[TC.TUPLE]
+        if "min_arity" in t_params:
+            if len(ty.fields) < t_params["min_arity"]:
                 return False
         if "constrained" in params:
-            for idx, inner_ty in params["constrained"].items():
+            for idx, inner_ty in t_params["constrained"].items():
                 if idx >= len(ty.fields):
                     return False
                 if ty.fields[idx] != inner_ty:
