@@ -155,13 +155,19 @@ class MemoizedSolver(Solver):
         return solution
 
 # some common relations
-
 class IdentityRelation(Relation):
     """
     Asserts all arguments have the same shape as the (single) result
     """
     def __init__(self, max_dim):
         self.max_dim = max_dim
+
+    # overidding hash for the benefit of the memoizer
+    def __hash__(self):
+        return hash(self.max_dim)
+
+    def __eq__(self, other):
+        return isinstance(other, IdentityRelation) and self.max_dim == other.max_dim
 
     def validate(self, arg_ranks, return_shapes):
         if len(return_shapes) != 1:
@@ -202,6 +208,13 @@ class BroadcastRelation(Relation):
     """
     def __init__(self, max_dim):
         self.max_dim = max_dim
+
+    # overidding hash for the benefit of the memoizer
+    def __hash__(self):
+        return hash(self.max_dim)
+
+    def __eq__(self, other):
+        return isinstance(other, BroadcastRelation) and self.max_dim == other.max_dim
 
     def validate(self, arg_ranks, return_shapes):
         if len(return_shapes) != 1 and len(arg_ranks) != 2:
