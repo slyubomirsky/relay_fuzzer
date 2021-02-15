@@ -179,7 +179,3 @@ class PatternConstructor:
         nested_patterns = [self.generate_pattern(input_type)
                            for input_type in instantiated_type.arg_types]
         return relay.PatternConstructor(ctor, nested_patterns)
-
-
-# Why no type constructor?
-# Omitted because it would just be the same as the AST constructors themselves
