@@ -59,30 +59,31 @@ class BroadcastingOp(OpInfo):
     def generate_arg_types(self, ret_type):
         assert isinstance(ret_type, relay.TensorType)
         dtype = ret_type.dtype
-        shape = ret_type.shape
-        arg_ranks = generate_broadcast_ranks(len(shape))
-        arg_shapes = self.solver.solve(arg_ranks, shape, self.relation)
+        shape = tuple([int(d) for d in ret_type.shape])
+        arg_ranks = self.generate_broadcast_ranks(len(shape))
+        arg_shapes = self.solver.solve(arg_ranks, [shape], self.relation)
         ret = [relay.TensorType(arg_shape, dtype) for arg_shape in arg_shapes]
+        return ret, None
 
     def supports_return_type(self, ret_type):
         return isinstance(ret_type, relay.TensorType)
 
 
 class AddInfo(BroadcastingOp):
-    def produce_call(arg_exprs, additional_params=None):
+    def produce_call(self, arg_exprs, additional_params=None):
         return relay.add(*arg_exprs)
 
 class SubInfo(BroadcastingOp):
-    def produce_call(arg_exprs, additional_params=None):
+    def produce_call(self, arg_exprs, additional_params=None):
         return relay.subtract(*arg_exprs)
 
 # note: elementwise mul, not matrix mul (which is nn.dense)
 class MulInfo(BroadcastingOp):
-    def produce_call(arg_exprs, additional_params=None):
+    def produce_call(self, arg_exprs, additional_params=None):
         return relay.multiply(*arg_exprs)
 
 class DivInfo(BroadcastingOp):
-    def produce_call(arg_exprs, additional_params=None):
+    def produce_call(self, arg_exprs, additional_params=None):
         return relay.divide(*arg_exprs)
 
 # TODO: Add more (there are tons)

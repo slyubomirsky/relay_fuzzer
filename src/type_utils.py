@@ -60,6 +60,9 @@ def attempt_unify(concrete, test):
             self.check_ty = old_val
             return ret
 
+        def visit_tensor_type(self, tt):
+            return tt == self.check_ty
+
         def visit_type_var(self, tv):
             tv_hash = tvm.ir.structural_hash(tv)
             if tv_hash not in assignments:

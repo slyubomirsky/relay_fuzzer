@@ -5,33 +5,41 @@ None of these should include any kind of decision-making or randomness directly.
 """
 import tvm
 from tvm import relay
-from tvm.relay.analysis import all_vars
 
 from type_constructor import TypeConstructs as TC
 
+def all_pattern_vars(pat, acc=None):
+    found = set() if acc is None else acc
+    if isinstance(pat, relay.PatternVar):
+        found.add(pat.var)
+        return found
+    if isinstance(pat, relay.PatternWildcard):
+        return found
+    if isinstance(pat, (relay.PatternTuple, relay.PatternConstructor)):
+        for inner_pat in pat.patterns:
+            found = all_pattern_vars(inner_pat, acc=found)
+        return found
+    raise TypeError(f"Unrecognized pattern {pat}")
+
 class ExprConstructor:
     def __init__(self, var_scope, generate_expr, generate_type,
-                 generate_ctor, generate_patterns, generate_op):
+                 choose_ctor, generate_patterns, generate_op):
         """
         var_scope: Responsible for producing variables
                    and tracking what's in scope
                    (lets, ifs, matches, and funcs produce new scopes)
         generate_expr: Function that takes a type and returns an expr of that type
         generate_type: As named (can specify supported types and params)
-        generate_ctor: Given an ADT handle, returns a constructor for it
+        choose_ctor: Given an ADT handle, returns a constructor for it
         generate_patterns: Given a type, generate a set of complete match patterns for it
         generate_op: Given a return type, returns the handler for an op with that return type
         """
         self.var_scope = var_scope
         self.generate_expr = generate_expr
         self.generate_type = generate_type
-        self.generate_ctor = generate_ctor
+        self.choose_ctor = choose_ctor
         self.generate_patterns = generate_patterns
         self.generate_op = generate_op
-
-    def constructor_tensor_literal(self, value):
-        # Trivial but provided for so all expressions other than vars could be represented
-        return relay.const(value)
 
     def construct_tuple_literal(self, member_types):
         return relay.Tuple([self.generate_expr(ty) for ty in member_types])
@@ -50,7 +58,7 @@ class ExprConstructor:
             return relay.Function(arg_vars, body, ret_type=ret_type)
 
     def construct_adt_literal(self, type_call):
-        ctor, instantiated_type = self.generate_ctor(type_call)
+        ctor, instantiated_type = self.choose_ctor(type_call)
         return relay.Call(ctor, [self.generate_expr(input_type)
                                  for input_type in instantiated_type.arg_types])
 
@@ -80,7 +88,7 @@ class ExprConstructor:
                 "constrained": constrained
             }
         })
-        assert isinstance(tup_ty, relay.TupleType)
+        assert isinstance(tup_type, relay.TupleType)
         return relay.TupleGetItem(self.generate_expr(tup_type), idx)
 
     def construct_if_branch(self, ret_type):
@@ -100,9 +108,9 @@ class ExprConstructor:
                 "ret_type": ret_type
             }
         })
-        assert isinstance(func_ty, relay.FuncType)
+        assert isinstance(func_type, relay.FuncType)
         func_expr = self.generate_expr(func_type)
-        arg_exprs = [self.generate_expr(arg_types) for arg_types in func_ty.arg_types]
+        arg_exprs = [self.generate_expr(arg_types) for arg_types in func_type.arg_types]
         return relay.Call(func_expr, arg_exprs)
 
     def construct_match(self, ret_type):
@@ -117,9 +125,9 @@ class ExprConstructor:
         match_clauses = []
         # if there are var patterns, those vars are bound to a new scope in each clause
         for pattern in match_patterns:
-            pattern_vars = all_vars(pattern)
+            pattern_vars = all_pattern_vars(pattern)
             with self.var_scope.new_scope():
-                for var in patterns:
+                for var in pattern_vars:
                     self.var_scope.add_to_scope(var)
                 match_expr = self.generate_expr(ret_type)
             match_clauses.append(relay.Clause(pattern, match_expr))

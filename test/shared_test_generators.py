@@ -1,16 +1,21 @@
 """
 Basic generators that the tests will use to ensure the components work
 """
+import numpy as np
 import tvm
 from tvm import relay
 import random
 
-from expr_constructor import PatternConstructor
+from expr_constructor import ExprConstructor, PatternConstructor
+
+from op_info import AddInfo, SubInfo, MulInfo, DivInfo
+from relation_solver import MemoizedSolver, ILPSolver
+from scope import VarScope
 
 from type_constructor import TypeConstructs as TC
 from type_constructor import TypeConstructor
 
-from type_utils import get_instantiated_constructors
+from type_utils import (instantiate, get_instantiated_constructors, attempt_unify, partially_instantiate_func)
 
 MAX_DIM = 5
 MAX_ARITY = 5
@@ -119,3 +124,147 @@ class TestPatternGenerator(FuelDriver):
         assert isinstance(input_type, relay.TypeCall)
         ctors = get_instantiated_constructors(self.p, input_type)
         return random.choice(ctors)
+
+
+class TestExprGenerator(FuelDriver):
+    def __init__(self, prelude, fuel=10):
+        super().__init__(fuel)
+        self.var_scope = VarScope("gen_var")
+        for gv in prelude.mod.get_global_vars():
+            # not all global vars checked types are populated
+            # and there is no way to check besides this...
+            try:
+                self.var_scope.add_to_global_scope(gv, gv.checked_type)
+            except:
+                continue
+
+        self.prelude = prelude
+        self.solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
+        self.supported_ops = [
+            AddInfo(MAX_DIM, self.solver),
+            SubInfo(MAX_DIM, self.solver),
+            MulInfo(MAX_DIM, self.solver),
+            DivInfo(MAX_DIM, self.solver)
+        ]
+        self.expr_ctor = ExprConstructor(
+            self.var_scope, self.generate_expr, self.generate_type, self.choose_ctor,
+            self.generate_patterns, self.generate_op)
+
+        self.literal_chance = 0.3
+        self.local_var_chance = 0.3
+        self.global_var_chance = 0.05
+        self.ref_write_chance = 0.05
+
+    def generate_type(self, gen_params=None):
+        if gen_params is None:
+            return TestTypeGenerator(self.prelude).generate_type()
+        return TestTypeGenerator(self.prelude).ctor.construct_type(gen_params=gen_params)
+
+    def choose_ctor(self, type_call):
+        return TestPatternGenerator(self.var_scope, self.prelude).choose_ctor(type_call)
+
+    def generate_patterns(self, ty):
+        return TestPatternGenerator(self.var_scope, self.prelude).generate_patterns(ty)
+
+    def generate_op(self, ty):
+        assert isinstance(ty, relay.TensorType)
+        return random.choice(self.supported_ops)
+
+    def generate_literal(self, ty, own_name=None):
+        # if we have a variable in scope of this type, pick that instead
+        if random.random() < self.local_var_chance:
+            local_scope = self.var_scope.get_local_scope()
+            appropriate_type = [v for v in local_scope if v.type_annotation == ty]
+            if len(appropriate_type) != 0:
+                return random.choice(appropriate_type)
+
+        if isinstance(ty, relay.FuncType) and random.random() < self.global_var_chance:
+            global_scope = self.var_scope.get_global_scope()
+            global_choices = []
+            for gv, gv_ty in global_scope.items():
+                success, _ = attempt_unify(ty, gv_ty)
+                if success:
+                    global_choices.append(gv)
+            if len(global_choices) != 0:
+                return random.choice(global_choices)
+
+        if isinstance(ty, relay.TensorType):
+            # numpy doesn't handle floats the same as tensors
+            dtype = ty.dtype
+            if len(ty.shape) == 0:
+                if dtype.startswith("float"):
+                    return relay.const(random.random(), dtype=dtype)
+                if dtype.startswith("bool"):
+                    return relay.const(True, dtype=dtype)
+                return relay.const(random.randint(0, 10), dtype=dtype)
+            # numpy doesn't like TVM shapes
+            conc_shape = [int(s) for s in ty.shape]
+            return relay.const(np.random.rand(*conc_shape).astype(dtype), dtype=dtype)
+        if isinstance(ty, relay.TupleType):
+            return self.expr_ctor.construct_tuple_literal(ty.fields)
+        if isinstance(ty, relay.FuncType):
+            return self.expr_ctor.construct_func_literal(ty.arg_types, ty.ret_type, own_name=own_name)
+        if isinstance(ty, relay.RefType):
+            return self.expr_ctor.construct_ref_literal(ty.value)
+        if isinstance(ty, relay.TypeCall):
+            return self.expr_ctor.construct_adt_literal(ty)
+        raise TypeError("Unrecognized type")
+
+    def generate_global_call(self, ty):
+        global_scope = self.var_scope.get_global_scope()
+        global_choices = []
+        for gv, gv_ty in global_scope.items():
+            success, ft = partially_instantiate_func(gv_ty, ty)
+            if not success:
+                continue
+            global_choices.append((gv, ft))
+
+        if len(global_choices) == 0:
+            return False, None
+        gv, ft = random.choice(global_choices)
+        # instantiate any remaining type vars
+        instantiation_map = [
+            (tv, self.generate_type())
+            for tv in ft.type_params
+        ]
+        strip_ft = relay.FuncType(ft.arg_types, ft.ret_type)
+        inst_ft = instantiate(strip_ft, instantiation_map)
+        return True, relay.Call(gv, [
+            self.generate_expr(arg_ty)
+            for arg_ty in inst_ft.arg_types
+        ])
+
+    def generate_connective(self, ty):
+        # see if we can get a global function with the right return type
+        if random.random() < self.global_var_chance:
+            success, call = self.generate_global_call(ty)
+            if success:
+                return call
+
+        choices = [
+            lambda: self.expr_ctor.construct_ref_read(ty),
+            lambda: self.expr_ctor.construct_function_call(ty),
+            lambda: self.expr_ctor.construct_match(ty),
+            lambda: self.expr_ctor.construct_if_branch(ty),
+            lambda: self.expr_ctor.construct_tuple_index(ty, random.randint(0, MAX_ARITY-1))
+        ]
+
+        # constructs available only for some types
+        if ty == relay.TupleType([]) and random.random() < self.ref_write_chance:
+            choices.append(self.expr_ctor.construct_ref_write)
+        # note: when we support more ops,
+        # it will be necessary to check the return type
+        # in more detail than this
+        if isinstance(ty, relay.TensorType):
+            choices.append(lambda: self.expr_ctor.construct_op_call(ty))
+
+        thunk = random.choice(choices)
+        return thunk()
+
+    def generate_expr(self, ty, own_name=None):
+        if self.fuel == 0:
+            return self.generate_literal(ty, own_name=own_name)
+        self.decrease_fuel()
+        if random.random() < self.literal_chance:
+            return self.generate_literal(ty, own_name=own_name)
+        return self.generate_connective(ty)
