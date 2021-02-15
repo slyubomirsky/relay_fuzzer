@@ -14,17 +14,24 @@ class OpInfo:
     and producing the actual call to the operator
     (to abstract over the many differences among Relay ops)
     """
-    def generate_arg_types(ret_type):
+    def generate_arg_types(self, ret_type):
         """
         Given the return type, solves constraints to get the arg types.
         Returns a list of arg types and optionally any additional parameters
         """
         raise NotImplementedError()
 
-    def produce_call(arg_exprs, additional_params=None):
+    def produce_call(self, arg_exprs, additional_params=None):
         """
         Given expression args of the appropriate type, return an op call.
         (Provided in case there are non-expression arguments that also need to be set)
+        """
+        raise NotImplementedError()
+
+    def supports_return_type(self, ty):
+        """
+        Can this operator return the given type?
+        Provided because different operators have weird rules on that
         """
         raise NotImplementedError()
 
@@ -56,6 +63,10 @@ class BroadcastingOp(OpInfo):
         arg_ranks = generate_broadcast_ranks(len(shape))
         arg_shapes = self.solver.solve(arg_ranks, shape, self.relation)
         ret = [relay.TensorType(arg_shape, dtype) for arg_shape in arg_shapes]
+
+    def supports_return_type(self, ret_type):
+        return isinstance(ret_type, relay.TensorType)
+
 
 class AddInfo(BroadcastingOp):
     def produce_call(arg_exprs, additional_params=None):
