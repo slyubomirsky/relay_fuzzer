@@ -59,8 +59,12 @@ class ExprConstructor:
 
     def construct_adt_literal(self, type_call):
         ctor, instantiated_type = self.choose_ctor(type_call)
+        # we must annotate the type args or else TVM
+        # may not be able to infer types in cases like
+        # Nil() or None()
         return relay.Call(ctor, [self.generate_expr(input_type)
-                                 for input_type in instantiated_type.arg_types])
+                                 for input_type in instantiated_type.arg_types],
+                          type_args=type_call.args)
 
     # connectives
 
@@ -136,9 +140,9 @@ class ExprConstructor:
     def construct_ref_write(self):
         # ref writes are always of type (), so there is no type param
         ref_type = self.generate_type(gen_params={TC.REF: {}})
-        assert isinstance(ref_ty, relay.RefType)
+        assert isinstance(ref_type, relay.RefType)
         ref_expr = self.generate_expr(ref_type)
-        inner_type = ref_ty.value
+        inner_type = ref_type.value
         assign_expr = self.generate_expr(inner_type)
         return relay.RefWrite(ref_expr, assign_expr)
 
