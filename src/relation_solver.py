@@ -8,6 +8,78 @@ import mip
 import random
 from mip import Model, BINARY, INTEGER
 
+def add_and_constraint(solver, a, b):
+    """
+    For two boolean ILP variables a and b, this adds a new var c
+    that is true iff a /\ b is true.
+
+    Based on https://cs.stackexchange.com/a/12118
+    """
+    c = solver.add_var(var_type=BINARY)
+    # a + b - 1 is 1 only when a = b = 1
+    solver += (c >= a + b - 1)
+    # if a is 0, c must be 0
+    solver += (c <= a)
+    # if b is 0, c must be 0
+    solver += (c <= b)
+    return c
+
+
+def add_or_constraint(solver, a, b):
+    """
+    For two boolean ILP vars a and b, adds a new var c
+    that is true iff a \/ b is true
+
+    Based on https://cs.stackexchange.com/a/12118
+    """
+    c = solver.add_var(var_type=BINARY)
+    # a + b is 0 only when they are both 0
+    solver += (c <= a + b)
+    # if a is 1, c must be 1
+    solver += (c >= a)
+    # if b is 1, c must be 1
+    solver += (c >= b)
+    return c
+
+
+def add_gt_constraint(solver, a, b, M):
+    """
+    For two *integer* ILP vars a and b and *constant* M where M > a and M > b,
+    this creates a boolean var c that is 1 iff a > b
+
+    Based on https://math.stackexchange.com/a/2501007
+    """
+    c = solver.add_var(var_type=BINARY)
+    # if a > b, this is true no matter the value of c
+    # if a <= b, c *must be* 0 for this to be true
+    solver += (a >= b - M*(1-c))
+    # if a <= b, this is true no matter the value of c.
+    # if a > b, c *must be* 1 for this to be true
+    solver += (a <= b + M*c)
+    return c
+
+
+def add_eq_constraint(solver, a, b, M):
+    """
+    For two *integer* ILP vars (or integer constants) a and b and *constant* M
+    where M > a and M > b, this creates a boolean var c that is 1 iff a == b
+    """
+    # a == b <--> a <= b and a >= b
+    a_lte_b = 1 - add_gt_constraint(solver, a, b, M)
+    a_gte_b = 1 - add_gt_constraint(solver, b, a, M)
+    return add_and_constraint(solver, a_lte_b, a_gte_b)
+
+
+def branch_constraints(solver, condition, true_branch, false_branch):
+    """
+    Given a boolean condition variable and boolean variables true_branch and false_branch,
+    sets up constraints so that true_branch is true iff condition is true
+    and false_branch is true iff condition is false
+    """
+    solver += (condition == true_branch)
+    solver += ((1 - condition) == false_branch)
+
+
 class Relation:
     """
     Base class for specifying a type relation, meant to be
@@ -202,9 +274,18 @@ class BroadcastRelation(Relation):
     """
     Used for most binary elementwise operators:
     Valid for exactly 2 arguments and 1 result.
-    The two arguments can have different ranks but should match each other (and the result)
-    up to the length of the shorter rank.
-    The longer argument must match the result.
+    Suppose the two arguments s1 and s2 have ranks r1 and r2.
+    Let m1 be max(r1, r2), m2 be min(r1, r2).
+    Let l1 be the longer of the two arguments and l2r be the shorter
+    The result should be of rank m1.
+    result[0:m1-m2-1] == l1[0:m1-m2-1]
+
+    For the remaining m2 indices:
+      if l1[i] == 1, result[i] == l2[i]
+      if l2[i] == 1, result[i] == l1[i]
+      if l1[i] != 1 and l2[i] != 1, then l1[i] must equal l2[i] and result[i] == l1[i]
+
+    See https://github.com/apache/tvm/blob/fc48514f1d8ccffcebd12007cb6c602506975703/src/relay/op/type_relations.cc#L67
     """
     def __init__(self, max_dim):
         self.max_dim = max_dim
@@ -227,12 +308,31 @@ class BroadcastRelation(Relation):
         a0 = arg_shapes[0]
         a1 = arg_shapes[1]
         sol_shape = return_shapes[0]
-        for i in range(len(sol_shape)):
+        min_rank = min(len(a0), len(a1))
+        max_rank = max(len(a0), len(a1))
+        diff = max_rank - min_rank
+        for i in range(diff):
             bcast_shape = sol_shape[i]
-            if i < len(a0) and bcast_shape != a0[i]:
+            if len(a0) == max_rank  and bcast_shape != a0[i]:
                 return False
-            if i < len(a1) and bcast_shape != a1[i]:
+            if len(a1) == max_rank and bcast_shape != a1[i]:
                 return False
+        for i in range(diff, len(sol_shape)):
+            bcast_shape = sol_shape[i]
+            min_idx = i - diff
+            max_idx = i
+            a0_elt = a0[min_idx] if len(a0) == min_rank else a0[max_idx]
+            a1_elt = a1[min_idx] if len(a1) == min_rank else a1[max_idx]
+
+            if a0_elt == 1 and bcast_shape != a1_elt:
+                return False
+            if a1_elt == 1 and bcast_shape != a0_elt:
+                return False
+            if a0_elt != 1 and a1_elt != 1:
+                if a0_elt != a1_elt:
+                    return False
+                if bcast_shape != a0_elt:
+                    return False
         return True
 
     def produce_ilp_constraints(self, solver, arg_ranks, return_shapes):
@@ -244,11 +344,39 @@ class BroadcastRelation(Relation):
         a0 = shape_vars[0]
         a1 = shape_vars[1]
         sol_shape = return_shapes[0]
-        for i in range(len(sol_shape)):
-            if i < len(a0):
-                solver += (a0[i] == sol_shape[i])
-            if i < len(a1):
-                solver += (a1[i] == sol_shape[i])
+
+        min_rank = min(len(a0), len(a1))
+        max_rank = max(len(a0), len(a1))
+        diff = max_rank - min_rank
+        for i in range(diff):
+            bcast_shape = sol_shape[i]
+            if len(a0) == max_rank:
+                solver += (bcast_shape == a0[i])
+            if len(a1) == max_rank:
+                solver += (bcast_shape == a1[i])
+        for i in range(diff, len(sol_shape)):
+            bcast_shape = sol_shape[i]
+            min_idx = i - diff
+            max_idx = i
+            a0_elt = a0[min_idx] if len(a0) == min_rank else a0[max_idx]
+            a1_elt = a1[min_idx] if len(a1) == min_rank else a1[max_idx]
+
+            M = self.max_dim + 1
+            a0_elt_eq_1 = add_eq_constraint(solver, a0_elt, 1, M)
+            a1_elt_eq_1 = add_eq_constraint(solver, a1_elt, 1, M)
+            bc_eq_a1_elt = add_eq_constraint(solver, bcast_shape, a1_elt, M)
+            bc_eq_a0_elt = add_eq_constraint(solver, bcast_shape, a0_elt, M)
+            a1_elt_eq_a0_elt = add_eq_constraint(solver, a0_elt, a1_elt, M)
+
+            # a0_elt == 1 -> bc == a1_elt
+            # a1_elt == 1 -> bc == a0_elt
+            # neither true -> equal each other and bc == a0_elt
+            # implication: a -> b is equivalent to b >= a (if a is 1, be must be 1; if b is 1, a may be 0)
+            solver += (bc_eq_a1_elt >= a0_elt_eq_1)
+            solver += (bc_eq_a0_elt >= a1_elt_eq_1)
+            neither_is_1 = add_and_constraint(solver, 1-a0_elt_eq_1, 1-a1_elt_eq_1)
+            solver += (a1_elt_eq_a0_elt >= neither_is_1)
+            solver += (bc_eq_a0_elt >= neither_is_1)
         return shape_vars
 
 # TODO: Add more

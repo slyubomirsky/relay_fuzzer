@@ -40,7 +40,7 @@ def all_solvers():
 def check_all(solvers, ranks, ret_shapes, relation):
     for solver in solvers:
         ret = solver.solve(ranks, ret_shapes, relation)
-        assert relation.check(ret, ret_shapes), (ret, ranks, ret_shapes)
+        assert relation.check(ret, ret_shapes), (ret, ranks, ret_shapes, solver)
 
 
 def solve_with_bf(ranks, ret_shapes, relation):
@@ -69,7 +69,7 @@ def test_identity_scalars():
         assert len(s) == 0
 
 
-def test_broadcast_scalars():
+def test_bcast_scalars():
     # all scalars should work too
     max_rank = 0
     ret_shapes = [[]]
@@ -104,8 +104,20 @@ def test_bcast_rel_fuzz():
         check_all(solvers, ranks, [ret_shape], bcast_rel)
 
 
+def test_bcast_examples():
+    # same example as in the TVM tests
+    solvers = all_solvers()
+    bcast_rel = BroadcastRelation(MAX_DIM)
+    for i in range(MAX_DIM + 1):
+        s1 = (MAX_DIM, i, MAX_DIM)
+        s2 = (i, 1)
+        expected = (MAX_DIM, i, MAX_DIM)
+        assert bcast_rel.check((s1, s2), (expected,))
+
+
 if __name__ == "__main__":
     test_identity_scalars()
-    test_broadcast_scalars()
+    test_bcast_scalars()
     test_identity_rel_fuzz()
     test_bcast_rel_fuzz()
+    test_bcast_examples()
