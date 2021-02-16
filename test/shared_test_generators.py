@@ -46,9 +46,9 @@ class TestTypeGenerator(FuelDriver):
                                     generate_type=self.generate_type)
 
     def generate_type(self):
+        self.decrease_fuel()
         if self.fuel == 0 and len(self.types_generated) != 0:
             return random.choice(self.types_generated)
-        self.decrease_fuel()
         ret = self.ctor.construct_type()
         self.types_generated.append(ret)
         return ret
@@ -58,15 +58,15 @@ class TestTypeGenerator(FuelDriver):
         return random.choice(available_constructs)
 
     def choose_tuple_arity(self, min_arity):
+        self.decrease_fuel()
         if self.fuel == 0:
             return min_arity
-        self.decrease_fuel()
         return random.randint(min_arity, max(min_arity, MAX_ARITY))
 
     def choose_func_arity(self):
+        self.decrease_fuel()
         if self.fuel == 0:
             return 0
-        self.decrease_fuel()
         return random.randint(0, MAX_ARITY)
 
     def choose_adt_handle(self, available_handles):
@@ -78,8 +78,10 @@ class TestTypeGenerator(FuelDriver):
         return random.choice(["float32", "float64", "int8", "bool"])
 
     def generate_shape(self):
-        arity = random.randint(0, MAX_ARITY)
         self.decrease_fuel()
+        if self.fuel == 0:
+            return []
+        arity = random.randint(0, MAX_ARITY)
         return [random.randint(1, MAX_DIM) for i in range(arity)]
 
 
@@ -102,13 +104,13 @@ class TestPatternGenerator(FuelDriver):
         return ret
 
     def generate_pattern(self, input_type):
+        self.decrease_fuel()
         # we can always have a wildcard or var pattern
         if not isinstance(input_type, (relay.TupleType, relay.TypeCall)) or self.fuel == 0:
             return random.choice([
                 relay.PatternWildcard(),
                 self.pat_ctor.construct_var_pattern(input_type)
             ])
-        self.decrease_fuel()
         # now we can choose between a wildcard, var, and either a ctor pattern or a tuple pattern depending on type
         choice = random.randint(0, 2)
         if choice == 0:
@@ -121,10 +123,11 @@ class TestPatternGenerator(FuelDriver):
         return self.pat_ctor.construct_ctor_pattern(input_type)
 
     def choose_ctor(self, input_type):
+        self.decrease_fuel()
         assert isinstance(input_type, relay.TypeCall)
         ctors = get_instantiated_constructors(self.p, input_type)
-        # if there is an argument-free constructor, choose it now
-        self.decrease_fuel()
+        # if we don't pick an argument-free constructor eventually,
+        # we can have an infinite loop
         if self.fuel == 0:
             for ctor, ft in ctors:
                 if len(ft.arg_types) == 0:
@@ -271,9 +274,9 @@ class TestExprGenerator(FuelDriver):
         return thunk()
 
     def generate_expr(self, ty, own_name=None):
+        self.decrease_fuel()
         if self.fuel == 0:
             return self.generate_literal(ty, own_name=own_name)
-        self.decrease_fuel()
         if random.random() < self.literal_chance:
             return self.generate_literal(ty, own_name=own_name)
         return self.generate_connective(ty)
