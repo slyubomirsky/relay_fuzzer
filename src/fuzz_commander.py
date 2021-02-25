@@ -2,16 +2,86 @@ import subprocess
 import time
 import base64
 import json
+from pathlib import Path
+import errno
+import glob
+import os
 
 import tvm
 from tvm import relay
 
 class FuzzCommander:
-    def __init__(self, fuzz_file_dir, output_dir, seed=0):
+    def __init__(self, fuzz_file_dir, output_dir, seed=0, heartbeatintrvl=300):
         """
-        
+        The FuzzCommander
+        fuzz_file_dir: Directory where generated fuzzed files are stored. There
+                       should not be anything in fuzz_file_dir except files to
+                       be used for fuzzing.
+        output_dir:    Directory where crash-info files should be written
+        seed:          the seed used to generate the fuzzed files
         """
-        pass
+        self.fuzz_file_dir = Path(fuzz_file_dir)
+        self.output_dir = Path(output_dir)
+        self.seed = seed
+        self.start_time = 0
+        self.heartbeatintrvl = heartbeatintrvl
+
+        self.raise_on_dir_not_exist(self.fuzz_file_dir)
+        self.raise_on_dir_not_exist(self.output_dir)
+
+        self.total_number_of_files = len(os.listdir(self.fuzz_file_dir))
+        self.files_fuzzed = 0
+        self.last_heartbeat_time = int(time.time())
+
+    def run_all_fuzz_files(self):
+        self.start_time = int(time.time())
+        for fuzzfile in glob.iglob(self.fuzz_file_dir / "*"):
+            self.run_one_fuzz_file(fuzzfile)
+            self.heartbeat()
+
+    def run_one_fuzz_file(self, filename):
+        fuzz_run = FuzzOnceFromFileName(filename,
+                                        self.get_problem_callback(),
+                                        self.get_problem_callback())
+        self.files_fuzzed += 1
+
+    def heartbeat(self):
+        current_time = int(time.time())
+        if current_time - self.last_heartbeat_time > self.heartbeatintrvl:
+            self.last_heartbeat_time = current_time
+            print("Progress ({0:.0%})".format(
+                self.files_fuzzed / self.total_number_of_files
+            ))
+
+    def get_problem_callback(self):
+        def callback(fuzz_run):
+            # fuzz_run is an instance of FuzzOnceFromFileName that
+            # has exited non-zero or timed out
+            crash_json = fuzz_run.to_crash_json()
+            
+            output_dir = Path(self.output_dir)
+            base_name = Path(fuzz_run.payload_identifier + ".crash")
+            write_output_to = output_dir / base_name
+            
+            crash_alert = "CRASH! From {} after {} sec, writing to {}".format(
+                fuzz_run.payload_identifier,
+                fuzz_run.problem_timestamp - self.start_time,
+                str(write_output_to)
+            )
+
+            # For testing, just in case we do find a crash and we accidnetally
+            # lose it because the actual file writing isn't working
+            tmpfile = Path("tmp.crash")
+            crash_json.write_to_file(str(tmpfile))
+
+            print(crash_alert)
+        return callback
+
+    def raise_on_dir_not_exist(self, d):
+        if not d.exists() or not d.is_dir():
+             raise FileNotFoundError(errno.ENOENT,
+                                    os.strerror(errno.ENOENT),
+                                     str(d))
 
 class FuzzOnceFromFileName:
     def __init__(self, payload_identifier, on_timeout, on_non_zero_exit, timeout_secs=10):
@@ -75,6 +145,15 @@ class FuzzOnceFromFileName:
             return self.compile_time_end - self.compile_time_start
         else:
             return None
+
+    def to_crash_json(self):
+         return CrashJson(self.payload_identifier,
+                          "timeout" if self.did_timeout else "crash",
+                          self.problem_timestamp,
+                          self.total_compile_time(),
+                          self.stdout,
+                          self.stderr,
+                          self.exit_code)
         
 class CrashJson:
     def __init__(self, identifier="", problem_type="crash", problem_timestamp=0,
