@@ -6,11 +6,6 @@ import json
 import tvm
 from tvm import relay
 
-def time_since_epoch():
-    # gmtime returns time struct
-    # mktime takes time struct and returns float sec since epoch
-    int(time.mktime(time.gmtime()))
-
 class FuzzCommander:
     def __init__(self, fuzz_file_dir, output_dir, seed=0):
         """
@@ -64,10 +59,12 @@ class FuzzOnceFromFileName:
             self.exit_code = cpe.returncode
             self.stdout = cpe.stdout
             self.stderr = cpe.stderr
+            self.problem_timestamp = int(time.time())
             self.on_non_zero_exit(self)
         except subprocess.TimeoutExpired as te:
             self.did_timeout = True
             self.exit_code = -1 # Some err in case someone checks run's return
+            self.problem_timestamp = int(time.time())
             self.on_timeout(self)
         return self.exit_code
 
