@@ -10,6 +10,8 @@ import os
 import tvm
 from tvm import relay
 
+test_runner = Path("~/repos/relay_fuzzer/src/test_runner.py")
+
 class FuzzCommander:
     def __init__(self, fuzz_file_dir, output_dir, seed=0, heartbeatintrvl=300):
         """
@@ -35,7 +37,7 @@ class FuzzCommander:
 
     def run_all_fuzz_files(self):
         self.start_time = int(time.time())
-        for fuzzfile in glob.iglob(self.fuzz_file_dir / "*"):
+        for fuzzfile in glob.iglob(str(self.fuzz_file_dir / "*")):
             self.run_one_fuzz_file(fuzzfile)
             self.heartbeat()
 
@@ -43,14 +45,16 @@ class FuzzCommander:
         fuzz_run = FuzzOnceFromFileName(filename,
                                         self.get_problem_callback(),
                                         self.get_problem_callback())
+        fuzz_run.run()
         self.files_fuzzed += 1
 
     def heartbeat(self):
         current_time = int(time.time())
         if current_time - self.last_heartbeat_time > self.heartbeatintrvl:
             self.last_heartbeat_time = current_time
-            print("Progress ({0:.0%})".format(
-                self.files_fuzzed / self.total_number_of_files
+            print("PULSE. Progress ({0:.0%}). Live for {} minutes".format(
+                self.files_fuzzed / self.total_number_of_files,
+                int((current_time - self.start_time) / 60)
             ))
 
     def get_problem_callback(self):
@@ -100,9 +104,8 @@ class FuzzOnceFromFileName:
         self.timeout_secs = timeout_secs
         self.compile_time_start = None
         self.compile_time_end = None
-        self.test_runner_shell_cmd = "python3 \
-                                      ~/repos/relay_fuzzer/src/test_runner.py \
-                                      {}".format(self.payload_identifier)
+        self.test_runner_shell_cmd = "python3 {} {}".format(str(test_runner),
+                                                            self.payload_identifier)
         self.did_crash = False
         self.did_timeout = False
         self.stdout = ""
@@ -196,8 +199,6 @@ class CrashJson:
 
 if __name__ == '__main__':
     import sys
-    fuzz_once = FuzzOnceFromFileName(sys.argv[1],
-                                     (lambda x: print("timeout")),
-                                     (lambda x: print("non-zero")))
-    fuzz_once.run()
+    fuzz = FuzzCommander(sys.argv[1], sys.argv[2])
+    fuzz.run_all_fuzz_files()
     
