@@ -40,6 +40,10 @@ class FuzzCommander:
         for fuzzfile in glob.iglob(str(self.fuzz_file_dir / "*")):
             self.run_one_fuzz_file(fuzzfile)
             self.heartbeat()
+        print("Ran out of files. Total time: {}. Total files ran: {}".format(
+            int(time.time()) - self.start_time,
+            self.files_fuzzed
+        ))
 
     def run_one_fuzz_file(self, filename):
         fuzz_run = FuzzOnceFromFileName(filename,
@@ -52,7 +56,7 @@ class FuzzCommander:
         current_time = int(time.time())
         if current_time - self.last_heartbeat_time > self.heartbeatintrvl:
             self.last_heartbeat_time = current_time
-            print("PULSE. Progress ({0:.0%}). Live for {} minutes".format(
+            print("PULSE. Progress ({0:.0%}). Live for {1} minutes.".format(
                 self.files_fuzzed / self.total_number_of_files,
                 int((current_time - self.start_time) / 60)
             ))
@@ -62,9 +66,15 @@ class FuzzCommander:
             # fuzz_run is an instance of FuzzOnceFromFileName that
             # has exited non-zero or timed out
             crash_json = fuzz_run.to_crash_json()
+
+            # These two lines for testing only, just in case we do find a crash
+            # and we accidnetally lose it because the actual file writing isn't
+            # working or something errors
+            tmpfile = Path("tmp.crash")
+            crash_json.write_to_file(str(tmpfile))
             
             output_dir = Path(self.output_dir)
-            base_name = Path(fuzz_run.payload_identifier + ".crash")
+            base_name = Path("{}.crash".format(fuzz_run.payload_identifier))
             write_output_to = output_dir / base_name
             
             crash_alert = "CRASH! From {} after {} sec, writing to {}".format(
@@ -72,13 +82,8 @@ class FuzzCommander:
                 fuzz_run.problem_timestamp - self.start_time,
                 str(write_output_to)
             )
-
-            # For testing, just in case we do find a crash and we accidnetally
-            # lose it because the actual file writing isn't working
-            tmpfile = Path("tmp.crash")
-            crash_json.write_to_file(str(tmpfile))
-
             print(crash_alert)
+            crash_json.write_to_file(str(write_output_to))
         return callback
 
     def raise_on_dir_not_exist(self, d):
@@ -199,6 +204,13 @@ class CrashJson:
 
 if __name__ == '__main__':
     import sys
+    
+    if len(sys.argv) != 3:
+        print("Usage: python3 fuzz_commander.py \
+              <path_to_fuzzed_files> \
+              <path_to_store_crash_info_in>")
+        sys.exit(-1)
+        
     fuzz = FuzzCommander(sys.argv[1], sys.argv[2])
     fuzz.run_all_fuzz_files()
     
