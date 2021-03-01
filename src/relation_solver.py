@@ -527,7 +527,68 @@ class BiasAddRelation(Relation):
         return shape_vars
 
 
-# batch matmul relation
+class BatchMatmulRelation(Relation):
+    """
+    Type relation for batch matmul
+
+    See https://github.com/apache/tvm/blob/26733095f5a1e0887c32d644429d430bc1f51c91/src/relay/op/nn/nn.cc#L901
+    """
+    def __init__(self, max_dim):
+        self.max_dim = max_dim
+
+    # overidding hash for the benefit of the memoizer
+    def __hash__(self):
+        return hash(self.max_dim)
+
+    def __eq__(self, other):
+        return (isinstance(other, BatchMatmulRelation) and self.max_dim == other.max_dim)
+
+    def validate(self, arg_ranks, return_shapes):
+        if len(return_shapes) != 1 and len(arg_ranks) != 2:
+            return False
+        sol_shape = return_shapes[0]
+        d_rank = arg_ranks[0]
+        w_rank = arg_ranks[1]
+        return len(sol_shape) == 3 and d_rank == 3 and w_rank == 3
+
+    def check(self, arg_shapes, return_shapes):
+        x, y = arg_shapes[0], arg_shapes[1]
+        sol_shape = return_shapes[0]
+        return (sol_shape[0] == max(x[0], y[0])
+                and sol_shape[1] == x[1]
+                and sol_shape[2] == y[1]
+                and x[2] == y[2]
+                and (y[0] == 1 or x[0] == 1 or y[0] == x[0]))
+
+    def produce_ilp_constraints(self, solver, arg_ranks, return_shapes):
+        shape_vars = [
+            [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
+             for i in range(rank)]
+            for rank in arg_ranks
+        ]
+        x_shape = shape_vars[0]
+        y_shape = shape_vars[1]
+        sol_shape = return_shapes[0]
+
+        M = self.max_dim + 1
+        x0_eq_o0 = add_eq_constraint(solver, x_shape[0], sol_shape[0], M)
+        y0_eq_o0 = add_eq_constraint(solver, y_shape[0], sol_shape[0], M)
+        x0_eq_1 = add_eq_constraint(solver, x_shape[0], 1, M)
+        y0_eq_1 = add_eq_constraint(solver, y_shape[0], 1, M)
+        x0_eq_y0 = add_eq_constraint(solver, y_shape[0], x_shape[0], M)
+
+        # output[0] = x[0] or y[0]
+        solver += (x0_eq_o0 + y0_eq_o0 >= 1)
+        # If the output = x[0], then y[0] = x[0] or 1
+        solver += (y0_eq_1 + x0_eq_y0 >= x0_eq_o0)
+        # If the output = y[0], then x[0] = y[0] or 1
+        solver += (x0_eq_1 + x0_eq_y0 >= y0_eq_o0)
+
+        solver += (sol_shape[1] == x_shape[1])
+        solver += (sol_shape[2] == y_shape[1])
+        solver += (x_shape[2] == y_shape[2])
+        return shape_vars
+
 # batch norm relation
 # conv2d relation
 

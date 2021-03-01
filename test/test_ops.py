@@ -3,7 +3,7 @@ import random
 import tvm
 from tvm import relay
 
-from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_NONSCALAR_OPS)
+from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_NONSCALAR_OPS, BatchMatmulInfo)
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation)
 
@@ -68,6 +68,18 @@ def test_nonscalar_ops():
             check_op_setup(op_info, ret_type)
 
 
+def test_batch_matmul():
+    solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
+    op_info = BatchMatmulInfo(MAX_DIM, solver)
+
+    for i in range(NUM_ATTEMPTS):
+        shape = [random.randint(1, MAX_DIM) for i in range(3)]
+        dtype = generate_dtype()
+        ret_type = relay.TensorType(shape, dtype)
+        check_op_setup(op_info, ret_type)
+
+
 if __name__ == "__main__":
     test_basic_ops()
     test_nonscalar_ops()
+    test_batch_matmul()

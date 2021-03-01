@@ -1,7 +1,8 @@
 import random
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation,
-                             DenseRelation, BiasAddRelation)
+                             DenseRelation, BiasAddRelation,
+                             BatchMatmulRelation)
 
 MAX_RANK = 3
 MAX_DIM = 4
@@ -149,6 +150,16 @@ def test_bias_add_fuzz():
             check_all(solvers, ranks, [ret_shape], rel)
 
 
+def test_batch_matmul_fuzz():
+    # all ranks are fixed to 3
+    arg_ranks = [3, 3]
+    solvers = all_solvers()
+    rel = BatchMatmulRelation(MAX_DIM)
+    for i in range(NUM_ATTEMPTS):
+        ret_shape = [random.randint(1, MAX_DIM) for i in range(3)]
+        check_all(solvers, arg_ranks, [ret_shape], rel)
+
+
 if __name__ == "__main__":
     test_identity_scalars()
     test_bcast_scalars()
@@ -157,3 +168,4 @@ if __name__ == "__main__":
     test_bcast_examples()
     test_dense_rel_fuzz()
     test_bias_add_fuzz()
+    test_batch_matmul_fuzz()

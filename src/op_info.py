@@ -7,7 +7,8 @@ import tvm
 from tvm import relay
 
 from relation_solver import (BroadcastRelation, IdentityRelation,
-                             DenseRelation, BiasAddRelation)
+                             DenseRelation, BiasAddRelation,
+                             BatchMatmulRelation)
 
 class OpInfo:
     """
@@ -202,6 +203,34 @@ class BiasAddInfo(OpInfo):
         if not isinstance(ty, relay.TensorType):
             return False
         return len(ty.shape) != 0
+
+
+class BatchMatmulInfo(OpInfo):
+    def __init__(self, max_dim, solver):
+        self.max_dim = max_dim
+        self.solver = solver
+        self.relation = BatchMatmulRelation(max_dim)
+
+    def generate_arg_types(self, ret_type):
+        ret_dtype = ret_type.dtype
+        ret_shape = tuple([int(d) for d in ret_type.shape])
+        arg_ranks = [3, 3]
+        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], self.relation)
+        # TODO: technically, the type relation only checks the first arg's dtype so the second can be anything
+        arg_types = [
+            relay.TensorType(arg_shapes[0], ret_dtype),
+            relay.TensorType(arg_shapes[1], ret_dtype)
+        ]
+        return arg_types, None
+
+    def produce_call(self, arg_exprs, additional_params=None):
+        return relay.nn.batch_matmul(*arg_exprs)
+
+    def supports_return_type(self, ty):
+        # only supports tensors of rank 3
+        if not isinstance(ty, relay.TensorType):
+            return False
+        return len(ty.shape) == 3
 
 
 """
