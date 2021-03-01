@@ -3,7 +3,7 @@ import random
 import tvm
 from tvm import relay
 
-from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_DENSE_OPS)
+from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_NONSCALAR_OPS)
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation)
 
@@ -54,10 +54,10 @@ def test_basic_ops():
             check_op_setup(op_info, ret_type)
 
 
-def test_dense_ops():
+def test_nonscalar_ops():
     solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
     op_info_col = [
-        ctor(MAX_DIM, solver) for ctor in ALL_DENSE_OPS
+        ctor(MAX_DIM, solver) for ctor in ALL_NONSCALAR_OPS
     ]
 
     for op_info in op_info_col:
@@ -70,4 +70,4 @@ def test_dense_ops():
 
 if __name__ == "__main__":
     test_basic_ops()
-    test_dense_ops()
+    test_nonscalar_ops()

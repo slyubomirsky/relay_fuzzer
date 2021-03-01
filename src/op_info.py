@@ -6,7 +6,8 @@ import random
 import tvm
 from tvm import relay
 
-from relation_solver import BroadcastRelation, IdentityRelation, DenseRelation
+from relation_solver import (BroadcastRelation, IdentityRelation,
+                             DenseRelation, BiasAddRelation)
 
 class OpInfo:
     """
@@ -149,7 +150,6 @@ class DenseInfo(OpInfo):
 
         return arg_types, additional_params
 
-
     def produce_call(self, arg_exprs, additional_params=None):
         data = arg_exprs[0]
         weight = arg_exprs[1]
@@ -161,6 +161,41 @@ class DenseInfo(OpInfo):
             if "out_dtype" in additional_params:
                 out_dtype = additional_params["out_dtype"]
         return relay.nn.dense(data, weight, units=units, out_dtype=out_dtype)
+
+    def supports_return_type(self, ty):
+        # supports any nonscalar
+        if not isinstance(ty, relay.TensorType):
+            return False
+        return len(ty.shape) != 0
+
+
+class BiasAddInfo(OpInfo):
+    def __init__(self, max_dim, solver):
+        self.max_dim = max_dim
+        self.solver = solver
+
+    def generate_arg_types(self, ret_type):
+        ret_dtype = ret_type.dtype
+        ret_shape = tuple([int(d) for d in ret_type.shape])
+        ret_rank = len(ret_shape)
+        # TODO: parameterize this choice
+        axis = random.randint(-(ret_rank-1), ret_rank-1)
+        rel = BiasAddRelation(self.max_dim, axis)
+        arg_ranks = [ret_rank, 1]
+        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], rel)
+        arg_types = [
+            relay.TensorType(arg_shapes[0], ret_dtype),
+            relay.TensorType(arg_shapes[1], ret_dtype)
+        ]
+        return arg_types, axis
+
+    def produce_call(self, arg_exprs, additional_params=None):
+        data = arg_exprs[0]
+        weight = arg_exprs[1]
+        axis = 0
+        if additional_params is not None:
+            axis = additional_params
+        return relay.nn.bias_add(data, weight, axis=axis)
 
     def supports_return_type(self, ty):
         # supports any nonscalar
@@ -201,12 +236,13 @@ def initialize_identity_ops():
     ret.append(lambda max_dim, solver: ClipInfo(max_dim, solver))
     return ret
 
+
 ALL_BROADCASTING_OPS = initialize_broadcasting_ops()
 ALL_IDENTITY_OPS = initialize_identity_ops()
-# dense without units and dense with units
-ALL_DENSE_OPS = [
+ALL_NONSCALAR_OPS = [
     lambda max_dim, solver: DenseInfo(max_dim, solver, False),
-    lambda max_dim, solver: DenseInfo(max_dim, solver, True)
+    lambda max_dim, solver: DenseInfo(max_dim, solver, True),
+    BiasAddInfo
 ]
 
 # TODO: Add more (there are tons)

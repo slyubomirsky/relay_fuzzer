@@ -446,7 +446,6 @@ class DenseRelation(Relation):
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        all_vars = shape_vars
         data_shape = shape_vars[0]
         weight_shape = shape_vars[1]
         sol_shape = return_shapes[0]
@@ -461,7 +460,73 @@ class DenseRelation(Relation):
         return shape_vars
 
 
-# bias add relation
+class BiasAddRelation(Relation):
+    """
+    Type relation for bias add. Just checks that the first arg matches the return type and the second arg is a vector of the appropriate axis
+
+    See https://github.com/apache/tvm/blob/26733095f5a1e0887c32d644429d430bc1f51c91/src/relay/op/nn/nn.cc#L52
+    """
+    def __init__(self, max_dim, axis):
+        # nasty hack: eventually we will want to solve for the axis
+        self.max_dim = max_dim
+        self.axis = axis
+
+    # overidding hash for the benefit of the memoizer
+    def __hash__(self):
+        return hash((self.max_dim, self.axis))
+
+    def __eq__(self, other):
+        return (isinstance(other, BiasAddRelation)
+                and self.max_dim == other.max_dim
+                and self.axis == other.axis)
+
+    def compute_axis_idx(self, rank):
+        if self.axis < 0:
+            return rank + self.axis
+        return self.axis
+
+    def validate(self, arg_ranks, return_shapes):
+        # treat the axis param as a third scalar
+        if len(return_shapes) != 1 and len(arg_ranks) != 2:
+            return False
+        sol_shape = return_shapes[0]
+        d_rank = arg_ranks[0]
+        w_rank = arg_ranks[1]
+        axis_idx = self.compute_axis_idx(d_rank)
+        if axis_idx < 0 or axis_idx >= d_rank:
+            return False
+        if len(sol_shape) != d_rank:
+            return False
+        return w_rank == 1
+
+    def check(self, arg_shapes, return_shapes):
+        data = arg_shapes[0]
+        weight = arg_shapes[1]
+        sol_shape = return_shapes[0]
+        axis_idx = self.compute_axis_idx(len(sol_shape))
+
+        for i in range(len(sol_shape)):
+            if sol_shape[i] != data[i]:
+                return False
+        return weight[0] == sol_shape[axis_idx]
+
+    def produce_ilp_constraints(self, solver, arg_ranks, return_shapes):
+        shape_vars = [
+            [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
+             for i in range(rank)]
+            for rank in arg_ranks
+        ]
+        data_shape = shape_vars[0]
+        weight_shape = shape_vars[1]
+        sol_shape = return_shapes[0]
+        axis_idx = self.compute_axis_idx(len(sol_shape))
+
+        for i in range(len(sol_shape)):
+            solver += (sol_shape[i] == data_shape[i])
+        solver += (weight_shape[0] == data_shape[axis_idx])
+        return shape_vars
+
+
 # batch matmul relation
 # batch norm relation
 # conv2d relation

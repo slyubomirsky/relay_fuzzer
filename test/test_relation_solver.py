@@ -1,6 +1,7 @@
 import random
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
-                             IdentityRelation, BroadcastRelation, DenseRelation)
+                             IdentityRelation, BroadcastRelation,
+                             DenseRelation, BiasAddRelation)
 
 MAX_RANK = 3
 MAX_DIM = 4
@@ -28,6 +29,10 @@ def generate_dense_arg_ranks(target_rank, units_defined):
     if units_defined:
         ret.append(1)
     return ret
+
+
+def generate_bias_add_arg_ranks(target_rank):
+    return [target_rank, 1]
 
 
 def solve_and_check(solver, ranks, ret_shapes, relation):
@@ -132,6 +137,18 @@ def test_dense_rel_fuzz():
             check_all(solvers, ranks, [ret_shape], dense_rel)
 
 
+def test_bias_add_fuzz():
+    solvers = all_solvers()
+    for i in range(NUM_ATTEMPTS):
+        ret_shape = generate_return_shape(min_rank=1)
+        ret_rank = len(ret_shape)
+        for j in range(NUM_ATTEMPTS):
+            axis = random.randint(-(ret_rank-1), ret_rank-1)
+            rel = BiasAddRelation(MAX_DIM, axis)
+            ranks = generate_bias_add_arg_ranks(ret_rank)
+            check_all(solvers, ranks, [ret_shape], rel)
+
+
 if __name__ == "__main__":
     test_identity_scalars()
     test_bcast_scalars()
@@ -139,3 +156,4 @@ if __name__ == "__main__":
     test_bcast_rel_fuzz()
     test_bcast_examples()
     test_dense_rel_fuzz()
+    test_bias_add_fuzz()
