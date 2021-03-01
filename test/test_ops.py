@@ -3,7 +3,7 @@ import random
 import tvm
 from tvm import relay
 
-from op_info import *
+from op_info import ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation)
 
@@ -40,14 +40,13 @@ def generate_dtype():
     return random.choice(["int8", "float32", "float64", "int32", "int64"])
 
 
-def test_broadcast_ops():
+def test_ops():
     solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
-    broadcast_ops = [
-        ctor(MAX_DIM, solver)
-        for ctor in (AddInfo, SubInfo, MulInfo, DivInfo)
+    op_info_col = [
+        ctor(MAX_DIM, solver) for ctor in (ALL_BROADCASTING_OPS + ALL_IDENTITY_OPS)
     ]
 
-    for op_info in broadcast_ops:
+    for op_info in op_info_col:
         for i in range(NUM_ATTEMPTS):
             shape = generate_return_shape()
             dtype = generate_dtype()
@@ -56,4 +55,4 @@ def test_broadcast_ops():
 
 
 if __name__ == "__main__":
-    test_broadcast_ops()
+    test_ops()

@@ -8,7 +8,7 @@ import random
 
 from expr_constructor import ExprConstructor, PatternConstructor
 
-from op_info import AddInfo, SubInfo, MulInfo, DivInfo
+from op_info import ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS
 from relation_solver import MemoizedSolver, ILPSolver
 from scope import VarScope
 
@@ -150,10 +150,8 @@ class TestExprGenerator(FuelDriver):
         self.prelude = prelude
         self.solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
         self.supported_ops = [
-            AddInfo(MAX_DIM, self.solver),
-            SubInfo(MAX_DIM, self.solver),
-            MulInfo(MAX_DIM, self.solver),
-            DivInfo(MAX_DIM, self.solver)
+            ctor(MAX_DIM, self.solver)
+            for ctor in (ALL_IDENTITY_OPS + ALL_BROADCASTING_OPS)
         ]
         self.expr_ctor = ExprConstructor(
             self.var_scope, self.generate_expr, self.generate_type, self.choose_ctor,
