@@ -30,10 +30,10 @@ def generate_expr(prelude, ty):
 
 # we should try finer-grained tests than only this
 def test_fuzz():
-    prelude = relay.prelude.Prelude()
     import time
 
     for i in range(NUM_ATTEMPTS):
+        prelude = relay.prelude.Prelude()
         start = time.time()
         ty = generate_type(prelude)
         expr = generate_expr(prelude, ty)

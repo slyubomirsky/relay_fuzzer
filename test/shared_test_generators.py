@@ -8,7 +8,8 @@ import random
 
 from expr_constructor import ExprConstructor, PatternConstructor
 
-from op_info import AddInfo, SubInfo, MulInfo, DivInfo
+from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS,
+                     ALL_NONSCALAR_OPS, BatchNormInfo, BatchMatmulInfo)
 from relation_solver import MemoizedSolver, ILPSolver
 from scope import VarScope
 
@@ -149,12 +150,21 @@ class TestExprGenerator(FuelDriver):
 
         self.prelude = prelude
         self.solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
-        self.supported_ops = [
-            AddInfo(MAX_DIM, self.solver),
-            SubInfo(MAX_DIM, self.solver),
-            MulInfo(MAX_DIM, self.solver),
-            DivInfo(MAX_DIM, self.solver)
+
+        # (eventually we should factor this out)
+        # operators that can return any tensor
+        self.basic_tensor_ops = [
+            ctor(MAX_DIM, self.solver)
+            for ctor in (ALL_IDENTITY_OPS + ALL_BROADCASTING_OPS)
         ]
+        # operators that can return any nonscalar tensor
+        self.all_nonscalar_ops = self.basic_tensor_ops + [ctor(MAX_DIM, self.solver)
+                                                          for ctor in ALL_NONSCALAR_OPS]
+        # batch matmul returns a tensor of rank exactly 3,
+        # and it's probably not the only one
+        self.rank_3_ops = self.all_nonscalar_ops + [BatchMatmulInfo(MAX_DIM, self.solver)]
+        self.batch_norm_info = BatchNormInfo(MAX_DIM, self.solver)
+
         self.expr_ctor = ExprConstructor(
             self.var_scope, self.generate_expr, self.generate_type, self.choose_ctor,
             self.generate_patterns, self.generate_op)
@@ -175,12 +185,36 @@ class TestExprGenerator(FuelDriver):
         # if we don't force termination this way
         return TestPatternGenerator(self.var_scope, self.prelude, fuel=self.fuel).choose_ctor(type_call)
 
+    def has_available_op_calls(self, ty):
+        # types supported by op calls: tensor types or tuple of a tensor and 2 vectors;
+        # this is more efficient than naively looping through all the types
+        if isinstance(ty, relay.TensorType):
+            return True
+        # batch norm
+        if isinstance(ty, relay.TupleType):
+            return self.batch_norm_info.supports_return_type(ty)
+        return False
+
+    def supported_ops(self, ty):
+        ret = []
+        if isinstance(ty, relay.TensorType):
+            ret = self.basic_tensor_ops
+            if len(ty.shape) != 0:
+                ret = self.all_nonscalar_ops
+                # batch matmul works for a rank of exactly 3
+                if len(ty.shape) == 3:
+                    ret += self.rank_3_ops
+        # taking a shortcut for now
+        if isinstance(ty, relay.TupleType):
+            ret = [self.batch_norm_info]
+        assert len(ret) != 0
+        return ret
+
     def generate_patterns(self, ty):
         return TestPatternGenerator(self.var_scope, self.prelude).generate_patterns(ty)
 
     def generate_op(self, ty):
-        assert isinstance(ty, relay.TensorType)
-        return random.choice(self.supported_ops)
+        return random.choice(self.supported_ops(ty))
 
     def generate_literal(self, ty, own_name=None):
         # if we have a variable in scope of this type, pick that instead
@@ -264,10 +298,7 @@ class TestExprGenerator(FuelDriver):
         # constructs available only for some types
         if ty == relay.TupleType([]) and random.random() < self.ref_write_chance:
             choices.append(self.expr_ctor.construct_ref_write)
-        # note: when we support more ops,
-        # it will be necessary to check the return type
-        # in more detail than this
-        if isinstance(ty, relay.TensorType):
+        if self.has_available_op_calls(ty):
             choices.append(lambda: self.expr_ctor.construct_op_call(ty))
 
         thunk = random.choice(choices)

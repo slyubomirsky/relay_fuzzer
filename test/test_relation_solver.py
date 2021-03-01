@@ -1,13 +1,15 @@
 import random
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
-                             IdentityRelation, BroadcastRelation)
+                             IdentityRelation, BroadcastRelation,
+                             DenseRelation, BiasAddRelation,
+                             BatchMatmulRelation, BatchNormRelation)
 
 MAX_RANK = 3
 MAX_DIM = 4
 NUM_ATTEMPTS = 5
 
-def generate_return_shape():
-    rank = random.randint(0, MAX_RANK)
+def generate_return_shape(min_rank=0):
+    rank = random.randint(min_rank, MAX_RANK)
     return [random.randint(1, MAX_DIM) for i in range(rank)]
 
 
@@ -21,6 +23,17 @@ def generate_broadcast_arg_ranks(target_rank):
     ranks = [other_rank, target_rank]
     random.shuffle(ranks)
     return ranks
+
+
+def generate_dense_arg_ranks(target_rank, units_defined):
+    ret = [target_rank, 2]
+    if units_defined:
+        ret.append(1)
+    return ret
+
+
+def generate_bias_add_arg_ranks(target_rank):
+    return [target_rank, 1]
 
 
 def solve_and_check(solver, ranks, ret_shapes, relation):
@@ -115,9 +128,57 @@ def test_bcast_examples():
         assert bcast_rel.check((s1, s2), (expected,))
 
 
+def test_dense_rel_fuzz():
+    solvers = all_solvers()
+    for units_defined in (True, False):
+        dense_rel = DenseRelation(MAX_DIM, units_defined)
+        for i in range(NUM_ATTEMPTS):
+            ret_shape = generate_return_shape(min_rank=1)
+            ranks = generate_dense_arg_ranks(len(ret_shape), units_defined)
+            check_all(solvers, ranks, [ret_shape], dense_rel)
+
+
+def test_bias_add_fuzz():
+    solvers = all_solvers()
+    for i in range(NUM_ATTEMPTS):
+        ret_shape = generate_return_shape(min_rank=1)
+        ret_rank = len(ret_shape)
+        for j in range(NUM_ATTEMPTS):
+            axis = random.randint(-(ret_rank-1), ret_rank-1)
+            rel = BiasAddRelation(MAX_DIM, axis)
+            ranks = generate_bias_add_arg_ranks(ret_rank)
+            check_all(solvers, ranks, [ret_shape], rel)
+
+
+def test_batch_matmul_fuzz():
+    # all ranks are fixed to 3
+    arg_ranks = [3, 3]
+    solvers = all_solvers()
+    rel = BatchMatmulRelation(MAX_DIM)
+    for i in range(NUM_ATTEMPTS):
+        ret_shape = [random.randint(1, MAX_DIM) for i in range(3)]
+        check_all(solvers, arg_ranks, [ret_shape], rel)
+
+
+def test_batch_norm_fuzz():
+    solvers = all_solvers()
+    for i in range(NUM_ATTEMPTS):
+        ret_shape = generate_return_shape(min_rank=1)
+        ret_rank = len(ret_shape)
+        for j in range(NUM_ATTEMPTS):
+            axis = random.randint(-1, ret_rank-1)
+            rel = BatchNormRelation(MAX_DIM, axis)
+            axis_dim = ret_shape[axis]
+            ranks = [ret_rank, 1, 1, 1, 1]
+            check_all(solvers, ranks, [ret_shape, [axis_dim], [axis_dim]], rel)
+
 if __name__ == "__main__":
     test_identity_scalars()
     test_bcast_scalars()
     test_identity_rel_fuzz()
     test_bcast_rel_fuzz()
     test_bcast_examples()
+    test_dense_rel_fuzz()
+    test_bias_add_fuzz()
+    test_batch_matmul_fuzz()
+    test_batch_norm_fuzz()
