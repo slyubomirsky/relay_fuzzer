@@ -234,7 +234,7 @@ class IdentityRelation(Relation):
     def __init__(self, max_dim):
         self.max_dim = max_dim
 
-    # overidding hash for the benefit of the memoizer
+    # overiding hash for the benefit of the memoizer
     def __hash__(self):
         return hash(self.max_dim)
 
