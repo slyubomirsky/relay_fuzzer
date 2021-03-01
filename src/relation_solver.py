@@ -396,7 +396,7 @@ class DenseRelation(Relation):
 
     # overidding hash for the benefit of the memoizer
     def __hash__(self):
-        return hash(self.max_dim)
+        return hash((self.max_dim, self.units_defined))
 
     def __eq__(self, other):
         return isinstance(other, DenseRelation) and self.max_dim == other.max_dim and self.units_defined == other.units_defined
