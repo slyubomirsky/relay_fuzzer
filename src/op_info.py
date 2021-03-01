@@ -119,20 +119,20 @@ def define_identity_op(num_args, constructor):
 
 
 def initialize_broadcasting_ops():
-    constructors = [
-        relay.add, relay.subtract, relay.multiply, relay.divide
-    ]
-    return [define_broadcasting_op(ctor) for ctor in constructors]
+    return list(map(define_broadcasting_op, (
+        relay.add, relay.subtract, relay.multiply, relay.divide,
+        relay.logical_and, relay.logical_or, relay.logical_xor
+    )))
 
-ALL_BROADCASTING_OPS = initialize_broadcasting_ops()
 
 def initialize_identity_ops():
     # various unary ops (there are also identity ops that are not unary)
-    constructors = [
-        relay.ceil, relay.floor, relay.trunc, relay.sign, relay.logical_not
-    ]
-    return [define_identity_op(1, ctor) for ctor in constructors]
+    return list(map(lambda ctor: define_identity_op(1, ctor), (
+        relay.ceil, relay.floor, relay.trunc, relay.sign, relay.logical_not,
+        relay.log, relay.log10, relay.log2
+    )))
 
+ALL_BROADCASTING_OPS = initialize_broadcasting_ops()
 ALL_IDENTITY_OPS = initialize_identity_ops()
 
 # TODO: Add more (there are tons)

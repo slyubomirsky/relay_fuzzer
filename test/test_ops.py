@@ -37,7 +37,7 @@ def generate_return_shape():
 
 
 def generate_dtype():
-    return random.choice(["int8", "float32", "float64", "int32", "int64"])
+    return random.choice(["int8", "float32", "float64", "int32", "int64", "bool"])
 
 
 def test_ops():
