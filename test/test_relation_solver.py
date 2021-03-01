@@ -1,13 +1,13 @@
 import random
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
-                             IdentityRelation, BroadcastRelation)
+                             IdentityRelation, BroadcastRelation, DenseRelation)
 
 MAX_RANK = 3
 MAX_DIM = 4
 NUM_ATTEMPTS = 5
 
-def generate_return_shape():
-    rank = random.randint(0, MAX_RANK)
+def generate_return_shape(min_rank=0):
+    rank = random.randint(min_rank, MAX_RANK)
     return [random.randint(1, MAX_DIM) for i in range(rank)]
 
 
@@ -21,6 +21,13 @@ def generate_broadcast_arg_ranks(target_rank):
     ranks = [other_rank, target_rank]
     random.shuffle(ranks)
     return ranks
+
+
+def generate_dense_arg_ranks(target_rank, units_defined):
+    ret = [target_rank, 2]
+    if units_defined:
+        ret.append(1)
+    return ret
 
 
 def solve_and_check(solver, ranks, ret_shapes, relation):
@@ -115,9 +122,20 @@ def test_bcast_examples():
         assert bcast_rel.check((s1, s2), (expected,))
 
 
+def test_dense_rel_fuzz():
+    solvers = all_solvers()
+    for units_defined in (True, False):
+        dense_rel = DenseRelation(MAX_DIM, units_defined)
+        for i in range(NUM_ATTEMPTS):
+            ret_shape = generate_return_shape(min_rank=1)
+            ranks = generate_dense_arg_ranks(len(ret_shape), units_defined)
+            check_all(solvers, ranks, [ret_shape], dense_rel)
+
+
 if __name__ == "__main__":
     test_identity_scalars()
     test_bcast_scalars()
     test_identity_rel_fuzz()
     test_bcast_rel_fuzz()
     test_bcast_examples()
+    test_dense_rel_fuzz()

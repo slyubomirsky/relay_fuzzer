@@ -6,7 +6,7 @@ import random
 import tvm
 from tvm import relay
 
-from relation_solver import BroadcastRelation, IdentityRelation
+from relation_solver import BroadcastRelation, IdentityRelation, DenseRelation
 
 class OpInfo:
     """
@@ -109,7 +109,7 @@ class ClipInfo(IdentityOp):
 
     def generate_arg_types(self, ret_type):
         ret, _ = super().generate_arg_types(ret_type)
-        # additional params: a_min and a_max
+        # additional params: a_min and a_max (TODO: make parametrizable)
         clip_bound = 64.0 # totally arbitrary, does not affect type checking
         clip_params = [random.uniform(-clip_bound, clip_bound), random.uniform(-clip_bound, clip_bound)]
         return ret, (min(clip_params), max(clip_params))
@@ -118,6 +118,55 @@ class ClipInfo(IdentityOp):
         return relay.clip(arg_exprs[0],
                           a_min=additional_params[0],
                           a_max=additional_params[1])
+
+
+class DenseInfo(OpInfo):
+    def __init__(self, max_dim, solver, units_defined):
+        self.max_dim = max_dim
+        self.solver = solver
+        self.units_defined = units_defined
+        self.relation = DenseRelation(max_dim, units_defined)
+
+    def generate_arg_types(self, ret_type):
+        ret_dtype = ret_type.dtype
+        ret_shape = tuple([int(d) for d in ret_type.shape])
+        arg_ranks = [len(ret_shape), 2]
+        if self.units_defined:
+            arg_ranks.append(1)
+        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], self.relation)
+        additional_params = None
+        if self.units_defined:
+            additional_params = {
+                "units": arg_shapes[2][0]
+            }
+
+        # data type rules: can manually set an out data type (casts), otherwise use dtype of data input
+        # (for now, we will conservatively give everything the same dtype, which is by far the most common choice, but this is not inherently necessary!)
+        arg_types = [
+            relay.TensorType(arg_shapes[0], ret_dtype),
+            relay.TensorType(arg_shapes[1], ret_dtype)
+        ]
+
+        return arg_types, additional_params
+
+
+    def produce_call(self, arg_exprs, additional_params=None):
+        data = arg_exprs[0]
+        weight = arg_exprs[1]
+        units = None
+        out_dtype = ""
+        if additional_params is not None:
+            if "units" in additional_params:
+                units = additional_params["units"]
+            if "out_dtype" in additional_params:
+                out_dtype = additional_params["out_dtype"]
+        return relay.nn.dense(data, weight, units=units, out_dtype=out_dtype)
+
+    def supports_return_type(self, ty):
+        # supports any nonscalar
+        if not isinstance(ty, relay.TensorType):
+            return False
+        return len(ty.shape) != 0
 
 
 """
@@ -154,5 +203,10 @@ def initialize_identity_ops():
 
 ALL_BROADCASTING_OPS = initialize_broadcasting_ops()
 ALL_IDENTITY_OPS = initialize_identity_ops()
+# dense without units and dense with units
+ALL_DENSE_OPS = [
+    lambda max_dim, solver: DenseInfo(max_dim, solver, False),
+    lambda max_dim, solver: DenseInfo(max_dim, solver, True)
+]
 
 # TODO: Add more (there are tons)

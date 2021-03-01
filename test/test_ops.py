@@ -3,7 +3,7 @@ import random
 import tvm
 from tvm import relay
 
-from op_info import ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS
+from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_DENSE_OPS)
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation)
 
@@ -31,8 +31,8 @@ def check_op_setup(op_info, ret_type):
         assert False, f"{func} fails to type check"
 
 
-def generate_return_shape():
-    rank = random.randint(0, MAX_RANK)
+def generate_return_shape(min_rank=0):
+    rank = random.randint(min_rank, MAX_RANK)
     return [random.randint(1, MAX_DIM) for i in range(rank)]
 
 
@@ -40,7 +40,7 @@ def generate_dtype():
     return random.choice(["int8", "float32", "float64", "int32", "int64", "bool"])
 
 
-def test_ops():
+def test_basic_ops():
     solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
     op_info_col = [
         ctor(MAX_DIM, solver) for ctor in (ALL_BROADCASTING_OPS + ALL_IDENTITY_OPS)
@@ -54,5 +54,20 @@ def test_ops():
             check_op_setup(op_info, ret_type)
 
 
+def test_dense_ops():
+    solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
+    op_info_col = [
+        ctor(MAX_DIM, solver) for ctor in ALL_DENSE_OPS
+    ]
+
+    for op_info in op_info_col:
+        for i in range(NUM_ATTEMPTS):
+            shape = generate_return_shape(min_rank=1)
+            dtype = generate_dtype()
+            ret_type = relay.TensorType(shape, dtype)
+            check_op_setup(op_info, ret_type)
+
+
 if __name__ == "__main__":
-    test_ops()
+    test_basic_ops()
+    test_dense_ops()

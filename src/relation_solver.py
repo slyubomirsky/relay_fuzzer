@@ -379,4 +379,91 @@ class BroadcastRelation(Relation):
             solver += (bc_eq_a0_elt >= neither_is_1)
         return shape_vars
 
+
+class DenseRelation(Relation):
+    """
+    Type relation for dense (matrix multiplication):
+
+    Two cases: Either there is a unit param set (the weight is ignored) or the weight is used
+    If there is a unit param set and the data shape is (d0, ..., dn), then the weight shape must be (units, dn) and the output shape is (d0, ..., dn-1, units)
+    If there is not a unit param set, then if data shape is (d0, ..., dn) and the weight shape is (w0, w1), the output shape is (d0, ..., dn-1, w0) where dn must equal w1
+
+    See https://github.com/apache/tvm/blob/26733095f5a1e0887c32d644429d430bc1f51c91/src/relay/op/nn/nn.h#L40
+    """
+    def __init__(self, max_dim, units_defined):
+        self.max_dim = max_dim
+        self.units_defined = units_defined
+
+    # overidding hash for the benefit of the memoizer
+    def __hash__(self):
+        return hash(self.max_dim)
+
+    def __eq__(self, other):
+        return isinstance(other, DenseRelation) and self.max_dim == other.max_dim and self.units_defined == other.units_defined
+
+    def validate(self, arg_ranks, return_shapes):
+        # we will treat the unit param as a third scalar
+        expected_args = 3 if self.units_defined else 2
+        if len(return_shapes) != 1 and len(arg_ranks) != expected_args:
+            return False
+        sol_shape = return_shapes[0]
+        d_rank = arg_ranks[0]
+        w_rank = arg_ranks[1]
+        if self.units_defined:
+            unit = arg_ranks[2]
+            if unit != 1:
+                return False
+        # the data cannot be a scalar, the weight must be of rank 2,
+        # and the output must be of the same rank as the data
+        if d_rank == 0:
+            return False
+        if len(sol_shape) != d_rank:
+            return False
+        return w_rank == 2
+
+    def check(self, arg_shapes, return_shapes):
+        data = arg_shapes[0]
+        weight = arg_shapes[1]
+        # The only condition that differs when unit is defined is that w0 must match the units,
+        # since the output shape will match w0 in either case
+        if self.units_defined:
+            unit = arg_shapes[2][0]
+            if weight[0] != unit:
+                return False
+        sol_shape = return_shapes[0]
+        if sol_shape[-1] != weight[0]:
+            return False
+        if weight[1] != data[-1]:
+            return False
+        for i in range(len(data) - 1):
+            if sol_shape[i] != data[i]:
+                return False
+        return True
+
+    def produce_ilp_constraints(self, solver, arg_ranks, return_shapes):
+        shape_vars = [
+            [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
+             for i in range(rank)]
+            for rank in arg_ranks
+        ]
+        all_vars = shape_vars
+        data_shape = shape_vars[0]
+        weight_shape = shape_vars[1]
+        sol_shape = return_shapes[0]
+
+        if self.units_defined:
+            unit_var = shape_vars[2][0]
+            solver += (unit_var == weight_shape[0])
+        solver += (sol_shape[-1] == weight_shape[0])
+        solver += (weight_shape[1] == data_shape[-1])
+        for i in range(len(data_shape) - 1):
+            solver += (sol_shape[i] == data_shape[i])
+        return shape_vars
+
+
+# bias add relation
+# batch matmul relation
+# batch norm relation
+# conv2d relation
+
 # TODO: Add more
