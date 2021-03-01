@@ -102,6 +102,24 @@ class IdentityOp(OpInfo):
     def produce_call(self, arg_exprs, additional_params=None):
         return self.constructor(*arg_exprs)
 
+# special case: clip is an identity, unary op that also needs min and max params
+class ClipInfo(IdentityOp):
+    def __init__(self, max_dim, solver):
+        super().__init__(max_dim, solver, 1, relay.clip)
+
+    def generate_arg_types(self, ret_type):
+        ret, _ = super().generate_arg_types(ret_type)
+        # additional params: a_min and a_max
+        clip_bound = 64.0 # totally arbitrary, does not affect type checking
+        clip_params = [random.uniform(-clip_bound, clip_bound), random.uniform(-clip_bound, clip_bound)]
+        return ret, (min(clip_params), max(clip_params))
+
+    def produce_call(self, arg_exprs, additional_params=None):
+        return relay.clip(arg_exprs[0],
+                          a_min=additional_params[0],
+                          a_max=additional_params[1])
+
+
 """
 Wrappers to fill in default parameters for constructors
 (makes it easier to define the constructors below)
@@ -127,10 +145,12 @@ def initialize_broadcasting_ops():
 
 def initialize_identity_ops():
     # various unary ops (there are also identity ops that are not unary)
-    return list(map(lambda ctor: define_identity_op(1, ctor), (
+    ret = list(map(lambda ctor: define_identity_op(1, ctor), (
         relay.ceil, relay.floor, relay.trunc, relay.sign, relay.logical_not,
         relay.log, relay.log10, relay.log2
     )))
+    ret.append(lambda max_dim, solver: ClipInfo(max_dim, solver))
+    return ret
 
 ALL_BROADCASTING_OPS = initialize_broadcasting_ops()
 ALL_IDENTITY_OPS = initialize_identity_ops()
