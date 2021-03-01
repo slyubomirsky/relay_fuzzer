@@ -8,7 +8,7 @@ from tvm import relay
 
 from relation_solver import (BroadcastRelation, IdentityRelation,
                              DenseRelation, BiasAddRelation,
-                             BatchMatmulRelation)
+                             BatchMatmulRelation, BatchNormRelation)
 
 class OpInfo:
     """
@@ -232,6 +232,69 @@ class BatchMatmulInfo(OpInfo):
             return False
         return len(ty.shape) == 3
 
+
+class BatchNormInfo(OpInfo):
+    def __init__(self, max_dim, solver):
+        self.max_dim = max_dim
+        self.solver = solver
+
+    def valid_axes(self, data_shape, vector_shapes):
+        data_rank = len(data_shape)
+        ret = []
+        for i in range(data_rank):
+            if all(map(lambda v: v[0] == data_shape[i], vector_shapes)):
+                ret.append(i)
+                if i == data_rank - 1:
+                    ret.append(-1)
+        return ret
+
+    def generate_arg_types(self, ret_type):
+        data_type = ret_type.fields[0]
+        vec_types = ret_type.fields[1:]
+        ret_dtype = data_type.dtype
+
+        ret_shape = tuple([int(d) for d in data_type.shape])
+        vec_shapes = [(int(v.shape[0]),) for v in vec_types]
+        ret_rank = len(ret_shape)
+
+        # TODO: parameterize this choice(?)
+        axis = random.choice(self.valid_axes(ret_shape, vec_shapes))
+        rel = BatchNormRelation(self.max_dim, axis)
+
+        arg_ranks = [ret_rank, 1, 1, 1, 1]
+        arg_shapes = self.solver.solve(arg_ranks, [ret_shape] + vec_shapes, rel)
+        arg_types = [
+            relay.TensorType(arg_shape, ret_dtype)
+            for arg_shape in arg_shapes
+        ]
+        return arg_types, axis
+
+    def produce_call(self, arg_exprs, additional_params=None):
+        axis = 0
+        if additional_params is not None:
+            axis = additional_params
+        return relay.nn.batch_norm(*arg_exprs, axis=axis).astuple()
+
+    def supports_return_type(self, ty):
+        # tuple of length 3 where dtypes match and some axis is appropriate
+        if not isinstance(ty, relay.TupleType) or len(ty.fields) != 3:
+            return False
+        data_type = ty.fields[0]
+        vec_types = ty.fields[1:]
+        if not isinstance(data_type, relay.TensorType) or len(data_type.shape) == 0:
+            return False
+        data_shape = tuple([int(d) for d in data_type.shape])
+        data_dtype = data_type.dtype
+
+        vec_shapes = []
+        for v in vec_types:
+            if not isinstance(v, relay.TensorType) or len(v.shape) != 1:
+                return False
+            if v.dtype != data_dtype:
+                return False
+            vec_shapes.append((int(v.shape[0]),))
+        valid_axes = self.valid_axes(data_shape, vec_shapes)
+        return len(valid_axes) != 0
 
 """
 Wrappers to fill in default parameters for constructors

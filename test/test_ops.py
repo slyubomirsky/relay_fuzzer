@@ -3,7 +3,8 @@ import random
 import tvm
 from tvm import relay
 
-from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_NONSCALAR_OPS, BatchMatmulInfo)
+from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_NONSCALAR_OPS,
+                     BatchMatmulInfo, BatchNormInfo)
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation)
 
@@ -79,7 +80,26 @@ def test_batch_matmul():
         check_op_setup(op_info, ret_type)
 
 
+def test_batch_norm():
+    solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
+    op_info = BatchNormInfo(MAX_DIM, solver)
+
+    for i in range(NUM_ATTEMPTS):
+        data_shape = generate_return_shape(min_rank=1)
+        for j in range(NUM_ATTEMPTS):
+            axis = random.randint(-1, len(data_shape)-1)
+            vec_shape = (data_shape[axis],)
+            dtype = generate_dtype()
+            ret_type = relay.TupleType([
+                relay.TensorType(data_shape, dtype),
+                relay.TensorType(vec_shape, dtype),
+                relay.TensorType(vec_shape, dtype)
+            ])
+            check_op_setup(op_info, ret_type)
+
+
 if __name__ == "__main__":
     test_basic_ops()
     test_nonscalar_ops()
     test_batch_matmul()
+    test_batch_norm()

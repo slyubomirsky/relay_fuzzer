@@ -2,7 +2,7 @@ import random
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation,
                              DenseRelation, BiasAddRelation,
-                             BatchMatmulRelation)
+                             BatchMatmulRelation, BatchNormRelation)
 
 MAX_RANK = 3
 MAX_DIM = 4
@@ -160,6 +160,18 @@ def test_batch_matmul_fuzz():
         check_all(solvers, arg_ranks, [ret_shape], rel)
 
 
+def test_batch_norm_fuzz():
+    solvers = all_solvers()
+    for i in range(NUM_ATTEMPTS):
+        ret_shape = generate_return_shape(min_rank=1)
+        ret_rank = len(ret_shape)
+        for j in range(NUM_ATTEMPTS):
+            axis = random.randint(-1, ret_rank-1)
+            rel = BatchNormRelation(MAX_DIM, axis)
+            axis_dim = ret_shape[axis]
+            ranks = [ret_rank, 1, 1, 1, 1]
+            check_all(solvers, ranks, [ret_shape, [axis_dim], [axis_dim]], rel)
+
 if __name__ == "__main__":
     test_identity_scalars()
     test_bcast_scalars()
@@ -169,3 +181,4 @@ if __name__ == "__main__":
     test_dense_rel_fuzz()
     test_bias_add_fuzz()
     test_batch_matmul_fuzz()
+    test_batch_norm_fuzz()

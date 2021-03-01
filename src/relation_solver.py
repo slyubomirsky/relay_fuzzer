@@ -589,7 +589,87 @@ class BatchMatmulRelation(Relation):
         solver += (x_shape[2] == y_shape[2])
         return shape_vars
 
-# batch norm relation
+
+class BatchNormRelation(Relation):
+    """
+    Type relation for batch norm
+
+    See https://github.com/apache/tvm/blob/26733095f5a1e0887c32d644429d430bc1f51c91/src/relay/op/nn/nn.cc#L633
+    """
+    def __init__(self, max_dim, axis):
+        self.max_dim = max_dim
+        self.axis = axis
+
+    # overidding hash for the benefit of the memoizer
+    def __hash__(self):
+        return hash((self.max_dim, self.axis))
+
+    def __eq__(self, other):
+        return (isinstance(other, BatchNormRelation) and self.max_dim == other.max_dim
+                and self.axis == other.axis)
+
+    def get_axis_dim(self, return_data):
+        normed_rank = len(return_data)
+        if normed_rank == 0:
+            return False
+        axis_idx = self.axis if self.axis >= 0 else normed_rank - 1
+        return return_data[axis_idx]
+
+    def is_axis_vector(self, axis_dim, target):
+        return len(target) == 1 and target[0] == axis_dim
+
+    def validate(self, arg_ranks, return_shapes):
+        if len(return_shapes) != 3 and len(arg_ranks) != 5:
+            return False
+
+        # TODO: eventually we'll want to solve for the axis, not just pick one
+        normed_rank = len(return_shapes[0])
+        axis_dim = self.get_axis_dim(return_shapes[0])
+
+        running_mean = return_shapes[1]
+        if not self.is_axis_vector(axis_dim, running_mean):
+            return False
+        running_var = return_shapes[2]
+        if not self.is_axis_vector(axis_dim, running_var):
+            return False
+
+        input_rank = arg_ranks[0]
+        if input_rank != normed_rank:
+            return False
+        for arg_rank in arg_ranks[1:]:
+            if arg_rank != 1:
+                return False
+        return True
+
+    def check(self, arg_shapes, return_shapes):
+        normed_data = return_shapes[0]
+        axis_dim = self.get_axis_dim(normed_data)
+
+        for i in range(len(normed_data)):
+            if arg_shapes[0][i] != normed_data[i]:
+                return False
+        for arg_shape in arg_shapes[1:]:
+            if not self.is_axis_vector(axis_dim, arg_shape):
+                return False
+        return True
+
+    def produce_ilp_constraints(self, solver, arg_ranks, return_shapes):
+        shape_vars = [
+            [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
+             for i in range(rank)]
+            for rank in arg_ranks
+        ]
+        normed_data = return_shapes[0]
+        axis_dim = self.get_axis_dim(normed_data)
+
+        input_data = shape_vars[0]
+        input_vecs = shape_vars[1:]
+        for i, d in enumerate(input_data):
+            solver += (d == normed_data[i])
+        for vec in input_vecs:
+            solver += (vec[0] == axis_dim)
+        return shape_vars
+
 # conv2d relation
 
 # TODO: Add more
