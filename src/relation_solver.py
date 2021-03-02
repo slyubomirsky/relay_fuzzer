@@ -149,12 +149,14 @@ class BruteForceSolver(Solver):
 
 
 class ILPSolver(Solver):
-    def __init__(self, max_dim, max_time, solver_verbose):
+    def __init__(self, max_dim, max_time, solver_verbose, seed=None):
         self.max_dim = max_dim
         self.max_time = max_time
         m = Model()
         m.emphasis = mip.SearchEmphasis.FEASIBILITY
         m.verbose = int(solver_verbose)
+        if seed is not None:
+            m.seed = seed
         self.m = m
 
     def found_ilp_solution(self, solver_result):
