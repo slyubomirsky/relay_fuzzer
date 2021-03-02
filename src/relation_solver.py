@@ -3,6 +3,7 @@ Hide away all the ILP solving so the rest of the code
 doesn't have to worry about it
 """
 import itertools
+import math
 
 import mip
 import random
@@ -670,6 +671,85 @@ class BatchNormRelation(Relation):
             solver += (vec[0] == axis_dim)
         return shape_vars
 
-# conv2d relation
+
+class Conv2DRelation(Relation):
+    """
+    Type relation for Conv2D, which is very complicated
+
+    See https://github.com/apache/tvm/blob/a1d43c15ac6382831370c6de141bf80888761e70/src/relay/op/nn/convolution.h#L133
+    but it's really complicated so for now we'll use PyTorch's description:
+    https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html#conv2d
+    and the informal description:
+    https://tvm.apache.org/docs/api/python/relay/nn.html#tvm.relay.nn.conv2d
+    """
+    def __init__(self, max_dim):
+        self.max_dim = max_dim
+
+    # overidding hash for the benefit of the memoizer
+    def __hash__(self):
+        return hash(self.max_dim)
+
+    def __eq__(self, other):
+        return (isinstance(other, Conv2DRelation) and self.max_dim == other.max_dim)
+
+    def validate(self, arg_ranks, return_shapes):
+        if len(return_shapes) != 1 and len(arg_ranks) != 2:
+            return False
+
+        # all ranks must be 4
+        return (len(return_shapes[0]) == 4 and arg_ranks[0] == 4 and arg_ranks[1] == 4)
+
+    def check(self, arg_shapes, return_shapes):
+        # taking a very conservative approach for now,
+        # assuming that data layout is (batch_size, in_channels, H_in, W_in),
+        # weight layout is (out_channels, in_channels, kernel_size[0], kernel_size[1])
+        # and output layout is (batch_size, out_channels, H_out, W_in)
+        # where H_out = floor(((H_in + 2*padding - dilation*(kernel_size[0]-1)-1)/stride) + 1)
+        # and W_out = floor(((W_in + 2*padding - dilation*(kernel_size[1]-1)-1) / stride) + 1)
+
+        # fixing stride, dilation, and padding to default values for now
+        # (TODO: search over these too)
+        def compute_out_dim(in_dim, padding, dilation, kernel_size, stride):
+            return math.floor((in_dim + 2*padding - dilation * (kernel_size - 1))/stride + 1)
+
+        stride = (1, 1)
+        dilation = (1, 1)
+        padding = (0, 0)
+
+        N_d, C_in_d, H_in, W_in = arg_shapes[0]
+        C_out_w, C_in_w, k_h, k_w = arg_shapes[1]
+        N_o, C_out_o, H_out, W_out = return_shapes[0]
+
+        # agreement between values that should match exactly
+        if N_o != N_d or C_out_w != C_out_o or C_in_d != C_in_w:
+            return False
+
+        expected_h_out = compute_out_dim(H_in, padding[0], dilation[0], k_h, stride[0])
+        expected_w_out = compute_out_dim(W_in, padding[1], dilation[1], k_w, stride[1])
+        return H_out == expected_h_out and W_out == expected_w_out
+
+    def produce_ilp_constraints(self, solver, arg_ranks, return_shapes):
+        shape_vars = [
+            [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
+             for i in range(rank)]
+            for rank in arg_ranks
+        ]
+        M = self.max_dim + 1
+
+        N_o, C_out_o, H_out, W_out = return_shapes[0]
+        N_d, C_in_d, H_in, W_in = shape_vars[0]
+        C_out_w, C_in_w, k_h, k_w = shape_vars[1]
+
+        solver += (N_o == N_d)
+        solver += (C_out_o == C_out_w)
+        solver += (C_in_w == C_in_d)
+
+        # TODO: will need to use linear values if we _don't_ fix stride, dilation, etc
+        # to default values
+        expected_h_out = H_in - (k_h - 1)
+        expected_w_out = W_in - (k_w - 1)
+        solver += (H_out == expected_h_out)
+        solver += (W_out == expected_w_out)
+        return shape_vars
 
 # TODO: Add more

@@ -4,9 +4,8 @@ import tvm
 from tvm import relay
 
 from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS, ALL_NONSCALAR_OPS,
-                     BatchMatmulInfo, BatchNormInfo)
-from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
-                             IdentityRelation, BroadcastRelation)
+                     BatchMatmulInfo, BatchNormInfo, Conv2DInfo)
+from relation_solver import MemoizedSolver, ILPSolver
 
 MAX_RANK = 10
 MAX_DIM = 10
@@ -98,8 +97,19 @@ def test_batch_norm():
             check_op_setup(op_info, ret_type)
 
 
+def test_conv2d():
+    solver = MemoizedSolver(ILPSolver(MAX_DIM, 30, False))
+    op_info = Conv2DInfo(MAX_DIM, solver)
+    for i in range(NUM_ATTEMPTS):
+        shape = [random.randint(1, MAX_DIM) for i in range(4)]
+        dtype = generate_dtype()
+        ret_type = relay.TensorType(shape, dtype)
+        check_op_setup(op_info, ret_type)
+
+
 if __name__ == "__main__":
     test_basic_ops()
     test_nonscalar_ops()
     test_batch_matmul()
     test_batch_norm()
+    test_conv2d()

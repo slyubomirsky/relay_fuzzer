@@ -9,7 +9,7 @@ import random
 from expr_constructor import ExprConstructor, PatternConstructor
 
 from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS,
-                     ALL_NONSCALAR_OPS, BatchNormInfo, BatchMatmulInfo)
+                     ALL_NONSCALAR_OPS, BatchNormInfo, BatchMatmulInfo, Conv2DInfo)
 from relation_solver import MemoizedSolver, ILPSolver
 from scope import VarScope
 
@@ -163,6 +163,8 @@ class TestExprGenerator(FuelDriver):
         # batch matmul returns a tensor of rank exactly 3,
         # and it's probably not the only one
         self.rank_3_ops = self.all_nonscalar_ops + [BatchMatmulInfo(MAX_DIM, self.solver)]
+        # ditto conv2d
+        self.rank_4_ops = self.all_nonscalar_ops + [Conv2DInfo(MAX_DIM, self.solver)]
         self.batch_norm_info = BatchNormInfo(MAX_DIM, self.solver)
 
         self.expr_ctor = ExprConstructor(
@@ -203,7 +205,10 @@ class TestExprGenerator(FuelDriver):
                 ret = self.all_nonscalar_ops
                 # batch matmul works for a rank of exactly 3
                 if len(ty.shape) == 3:
-                    ret += self.rank_3_ops
+                    ret = self.rank_3_ops
+                # conv2d works for a rank of exactly 4
+                if len(ty.shape) == 4:
+                    ret = self.rank_4_ops
         # taking a shortcut for now
         if isinstance(ty, relay.TupleType):
             ret = [self.batch_norm_info]

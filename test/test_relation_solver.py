@@ -2,7 +2,8 @@ import random
 from relation_solver import (BruteForceSolver, ILPSolver, MemoizedSolver,
                              IdentityRelation, BroadcastRelation,
                              DenseRelation, BiasAddRelation,
-                             BatchMatmulRelation, BatchNormRelation)
+                             BatchMatmulRelation, BatchNormRelation,
+                             Conv2DRelation)
 
 MAX_RANK = 3
 MAX_DIM = 4
@@ -172,6 +173,17 @@ def test_batch_norm_fuzz():
             ranks = [ret_rank, 1, 1, 1, 1]
             check_all(solvers, ranks, [ret_shape, [axis_dim], [axis_dim]], rel)
 
+
+def test_conv2d_fuzz():
+    # all ranks are fixed to 4
+    arg_ranks = [4, 4]
+    solvers = all_solvers()
+    rel = Conv2DRelation(MAX_DIM)
+    for i in range(NUM_ATTEMPTS):
+        ret_shape = [random.randint(1, MAX_DIM) for i in range(4)]
+        check_all(solvers, arg_ranks, [ret_shape], rel)
+
+
 if __name__ == "__main__":
     test_identity_scalars()
     test_bcast_scalars()
@@ -182,3 +194,4 @@ if __name__ == "__main__":
     test_bias_add_fuzz()
     test_batch_matmul_fuzz()
     test_batch_norm_fuzz()
+    test_conv2d_fuzz()

@@ -8,7 +8,8 @@ from tvm import relay
 
 from relation_solver import (BroadcastRelation, IdentityRelation,
                              DenseRelation, BiasAddRelation,
-                             BatchMatmulRelation, BatchNormRelation)
+                             BatchMatmulRelation, BatchNormRelation,
+                             Conv2DRelation)
 
 class OpInfo:
     """
@@ -295,6 +296,36 @@ class BatchNormInfo(OpInfo):
             vec_shapes.append((int(v.shape[0]),))
         valid_axes = self.valid_axes(data_shape, vec_shapes)
         return len(valid_axes) != 0
+
+
+class Conv2DInfo(OpInfo):
+    def __init__(self, max_dim, solver):
+        self.max_dim = max_dim
+        self.solver = solver
+        self.relation = Conv2DRelation(max_dim)
+
+    def generate_arg_types(self, ret_type):
+        ret_dtype = ret_type.dtype
+        ret_shape = tuple([int(d) for d in ret_type.shape])
+
+        # TODO: Handle the plethora of optional params eventually
+        arg_ranks = [4, 4]
+        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], self.relation)
+        # TODO: handle dtype inference later
+        arg_types = [
+            relay.TensorType(arg_shape, ret_dtype)
+            for arg_shape in arg_shapes
+        ]
+        return arg_types, None
+
+    def produce_call(self, arg_exprs, additional_params=None):
+        # going to leave everything at default settings for now
+        return relay.nn.conv2d(*arg_exprs)
+
+    def supports_return_type(self, ty):
+        # tensor of rank 4
+        return isinstance(ty, relay.TensorType) and len(ty.shape) == 4
+
 
 """
 Wrappers to fill in default parameters for constructors
