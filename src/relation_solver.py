@@ -116,6 +116,9 @@ class Solver:
     def solve(self, arg_ranks, return_shapes, relation):
         raise NotImplementedError()
 
+    def set_seed(self, seed):
+        pass
+
 
 class BruteForceSolver(Solver):
     """
@@ -155,9 +158,12 @@ class ILPSolver(Solver):
         m = Model()
         m.emphasis = mip.SearchEmphasis.FEASIBILITY
         m.verbose = int(solver_verbose)
-        if seed is not None:
-            m.seed = seed
         self.m = m
+        if seed is not None:
+            self.set_seed(seed)
+
+    def set_seed(self, seed):
+        self.m.seed = seed
 
     def found_ilp_solution(self, solver_result):
         return (solver_result == mip.OptimizationStatus.OPTIMAL

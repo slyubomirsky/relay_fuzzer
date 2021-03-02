@@ -24,8 +24,10 @@ def generate_type(prelude):
     return TestTypeGenerator(prelude).generate_type()
 
 
-def generate_expr(prelude, ty):
-    return TestExprGenerator(prelude).generate_expr(ty)
+def generate_expr(prelude, ty, seed):
+    gen = TestExprGenerator(prelude)
+    gen.set_seed(seed)
+    return gen.generate_expr(ty)
 
 
 # we should try finer-grained tests than only this
@@ -36,7 +38,7 @@ def test_fuzz():
         prelude = relay.prelude.Prelude()
         start = time.time()
         ty = generate_type(prelude)
-        expr = generate_expr(prelude, ty)
+        expr = generate_expr(prelude, ty, i)
         check_well_formed(prelude, expr, ty)
         end = time.time()
         print(f"Iter time: {end - start}")

@@ -181,6 +181,9 @@ class TestExprGenerator(FuelDriver):
         self.global_var_chance = 0.05
         self.ref_write_chance = 0.05
 
+    def set_seed(self, seed):
+        self.config.reset_seed(seed)
+
     def generate_type(self, gen_params=None):
         gen = self.config.produce_type_generator(self.prelude)
         if gen_params is None:
@@ -369,7 +372,7 @@ def validate_config(config):
             return TestPatternGenerator(var_scope, prelude, fuel=pat_fuel,
                                         pattern_attempts=self.max_pattern_attempts)
 
-        def initialize_ops(self):
+        def initialize_solver(self):
             max_dim = self.max_dim
             # because the solver's random seed depends on the instance of the solver,
             # we need to configure this when we set up the ILP solver
@@ -378,6 +381,11 @@ def validate_config(config):
                       if self.use_ilp else BruteForceSolver(max_dim))
             if self.memoize_solver:
                 solver = MemoizedSolver(solver)
+            self.solver = solver
+
+        def initialize_ops(self):
+            max_dim = self.max_dim
+            solver = self.solver
 
             # TODO: factor out this logic and op dispatching to a dedicated class (too much coupling)
             self.basic_tensor_ops = [
@@ -396,6 +404,12 @@ def validate_config(config):
                 return
             random.seed(self.seed)
             np.random.seed(self.seed)
+            self.solver.set_seed(self.seed)
+
+        def reset_seed(self, seed):
+            self.set_seed = True
+            self.seed = seed
+            self.set_seeds()
 
     def set_field(config, inp, fieldname, default_value, validate=None):
         if inp is None or fieldname not in inp:
@@ -426,6 +440,7 @@ def validate_config(config):
     set_field(ret, config, "type_fuel", ret.fuel, positive_int)
     set_field(ret, config, "pattern_fuel", ret.fuel, positive_int)
 
+    ret.initialize_solver()
     ret.initialize_ops()
     ret.set_seeds()
     return ret
