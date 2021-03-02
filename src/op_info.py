@@ -321,20 +321,28 @@ def initialize_broadcasting_ops():
 
 def initialize_identity_ops():
     # various unary ops (there are also identity ops that are not unary)
-    ret = list(map(lambda ctor: define_identity_op(1, ctor), (
+    def construct_unary_op_call(ctor):
+        return define_identity_op(1, ctor)
+
+    ret = list(map(construct_unary_op_call, (
         relay.ceil, relay.floor, relay.trunc, relay.sign, relay.logical_not,
         relay.log, relay.log10, relay.log2
     )))
-    ret.append(lambda max_dim, solver: ClipInfo(max_dim, solver))
+    ret.append(ClipInfo)
     return ret
+
+
+def initialize_nonscalar_ops():
+    # ops that can return any tensor type except a scalar
+    def construct_dense_call(use_units):
+        def dense_call(max_dim, solver):
+            return DenseInfo(max_dim, solver, use_units)
+        return dense_call
+    return [construct_dense_call(True), construct_dense_call(False), BiasAddInfo]
 
 
 ALL_BROADCASTING_OPS = initialize_broadcasting_ops()
 ALL_IDENTITY_OPS = initialize_identity_ops()
-ALL_NONSCALAR_OPS = [
-    lambda max_dim, solver: DenseInfo(max_dim, solver, False),
-    lambda max_dim, solver: DenseInfo(max_dim, solver, True),
-    BiasAddInfo
-]
+ALL_NONSCALAR_OPS = initialize_nonscalar_ops()
 
 # TODO: Add more (there are tons)
