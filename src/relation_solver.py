@@ -4,6 +4,7 @@ doesn't have to worry about it
 """
 import itertools
 import math
+import time
 
 import mip
 import random
@@ -212,6 +213,9 @@ class MemoizedSolver(Solver):
         self.solver = solver
         self.memo = {}
 
+    def set_seed(self, seed):
+        self.solver.set_seed(seed)
+
     def solve(self, arg_ranks, return_shapes, relation):
         if not relation.validate(arg_ranks, return_shapes):
             raise ValueError("Relation invalid for the given ranks and return shapes")
@@ -234,6 +238,36 @@ class MemoizedSolver(Solver):
         solution = self.solver.solve(arg_ranks, return_shapes, relation)
         self.memo[relation][query] = solution
         return solution
+
+
+class ProfiledSolver(Solver):
+    """
+    Wrapper for solvers that records times per query
+    """
+    def __init__(self, solver):
+        self.solver = solver
+        self.record = []
+
+    def set_seed(self, seed):
+        self.solver.set_seed(seed)
+
+    def solve(self, arg_ranks, return_shapes, relation):
+        try:
+            start_time = time.time()
+            success = False
+            ret = self.solver.solve(arg_ranks, return_shapes, relation)
+            success = True
+            return ret
+        finally:
+            end_time = time.time()
+            self.record.append({
+                "time": end_time - start_time,
+                "success": success
+            })
+
+    def get_record(self):
+        return self.record
+
 
 # some common relations
 class IdentityRelation(Relation):

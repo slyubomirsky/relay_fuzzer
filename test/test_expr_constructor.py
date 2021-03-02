@@ -27,7 +27,10 @@ def generate_type(prelude):
 def generate_expr(prelude, ty, seed):
     gen = TestExprGenerator(prelude)
     gen.set_seed(seed)
-    return gen.generate_expr(ty)
+    ret = gen.generate_expr(ty)
+    if gen.get_solver_profile():
+        print(gen.get_solver_profile())
+    return ret
 
 
 # we should try finer-grained tests than only this

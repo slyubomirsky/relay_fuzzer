@@ -10,7 +10,7 @@ from expr_constructor import ExprConstructor, PatternConstructor
 
 from op_info import (ALL_BROADCASTING_OPS, ALL_IDENTITY_OPS,
                      ALL_NONSCALAR_OPS, BatchNormInfo, BatchMatmulInfo, Conv2DInfo)
-from relation_solver import MemoizedSolver, ILPSolver, BruteForceSolver
+from relation_solver import MemoizedSolver, ILPSolver, BruteForceSolver, ProfiledSolver
 from scope import VarScope
 
 from type_constructor import TypeConstructs as TC
@@ -180,9 +180,14 @@ class TestExprGenerator(FuelDriver):
         self.local_var_chance = 0.3
         self.global_var_chance = 0.05
         self.ref_write_chance = 0.05
+        # operators are more fun so we will want those to happen more often
+        self.operator_chance = 0.25
 
     def set_seed(self, seed):
         self.config.reset_seed(seed)
+
+    def get_solver_profile(self):
+        return self.config.get_solver_profile()
 
     def generate_type(self, gen_params=None):
         gen = self.config.produce_type_generator(self.prelude)
@@ -315,6 +320,10 @@ class TestExprGenerator(FuelDriver):
         if ty == relay.TupleType([]) and random.random() < self.ref_write_chance:
             choices.append(self.expr_ctor.construct_ref_write)
         if self.has_available_op_calls(ty):
+            # dumb way of skewing the choice
+            if random.random() < self.operator_chance:
+                return self.expr_ctor.construct_op_call(ty)
+
             choices.append(lambda: self.expr_ctor.construct_op_call(ty))
 
         thunk = random.choice(choices)
@@ -381,7 +390,7 @@ def validate_config(config):
                       if self.use_ilp else BruteForceSolver(max_dim))
             if self.memoize_solver:
                 solver = MemoizedSolver(solver)
-            self.solver = solver
+            self.solver = ProfiledSolver(solver)
 
         def initialize_ops(self):
             max_dim = self.max_dim
@@ -410,6 +419,9 @@ def validate_config(config):
             self.set_seed = True
             self.seed = seed
             self.set_seeds()
+
+        def get_solver_profile(self):
+            return self.solver.get_record()
 
     def set_field(config, inp, fieldname, default_value, validate=None):
         if inp is None or fieldname not in inp:
