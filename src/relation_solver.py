@@ -101,16 +101,6 @@ def add_eq_constraint(solver, a, b, M):
     return add_and_constraint(solver, a_lte_b, a_gte_b)
 
 
-def branch_constraints(solver, condition, true_branch, false_branch):
-    """
-    Given a boolean condition variable and boolean variables true_branch and false_branch,
-    sets up constraints so that true_branch is true iff condition is true
-    and false_branch is true iff condition is false
-    """
-    solver += (condition == true_branch)
-    solver += ((1 - condition) == false_branch)
-
-
 class Relation:
     """
     Base class for specifying a type relation, meant to be
@@ -138,7 +128,7 @@ class Relation:
         """
         raise NotImplementedError()
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def produce_ilp_constraints(self, solver, problem_instance, ilp_vars):
         """
         As the name implies, adds appropriate ILP constraints using the solver,
         based on the given problem instance.
