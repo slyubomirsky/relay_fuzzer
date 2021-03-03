@@ -26,18 +26,20 @@ def validate_types(op_info, arg_types, ret_type, additional_params):
     except Exception as e:
         assert False, f"{func} fails to type check"
 
+def assert_type_checks(op_info, arg_types, ret_type, additional_params):
+    assert op_info.supports_return_type(ret_type)
+    validate_types(op_info, arg_types, ret_type, additional_params)
 
 def check_op_setup(op_info, ret_type):
-    # make sure the result type checks
-    assert op_info.supports_return_type(ret_type)
     arg_types, additional_params = op_info.generate_arg_types(ret_type)
-    validate_types(op_info, arg_types, ret_type, additional_params)
+    assert_type_checks(op_info, arg_types, ret_type, additional_params)
 
 
 def check_sampled_types(op_info):
-    arg_types, ret_type, additional_params = op_info.sample_call()
-    assert op_info.supports_return_type(ret_type)
-    validate_types(op_info, arg_types, ret_type, additional_params)
+    arg_types, ret_type, additional_params = op_info.sample_call(use_solver=False)
+    assert_type_checks(op_info, arg_types, ret_type, additional_params)
+    arg_types, ret_type, additional_params = op_info.sample_call(use_solver=True)
+    assert_type_checks(op_info, arg_types, ret_type, additional_params)
 
 
 def generate_return_shape(min_rank=0):

@@ -61,6 +61,12 @@ def check_all(solvers, problem_instance, relation):
         solution = solve_and_check(solver, problem_instance, relation)
 
 
+def check_samples(rel, params):
+    for i in range(NUM_ATTEMPTS):
+        problem_instance, sample = rel.sample_solution(params)
+        assert rel.check(problem_instance, sample), sample
+
+
 def solve_with_bf(problem_instance, relation):
     return solve_and_check(BruteForceSolver(MAX_DIM),
                            problem_instance, relation)
@@ -111,6 +117,7 @@ def test_identity_rel_fuzz():
         ret_shape = generate_return_shape()
         ranks = generate_identity_arg_ranks(max_args, len(ret_shape))
         check_all(solvers, (ranks, (ret_shape,)), id_rel)
+    check_samples(id_rel, (MAX_RANK, max_args))
 
 
 def test_bcast_rel_fuzz():
@@ -120,6 +127,7 @@ def test_bcast_rel_fuzz():
         ret_shape = generate_return_shape()
         ranks = generate_broadcast_arg_ranks(len(ret_shape))
         check_all(solvers, (ranks, (ret_shape,)), bcast_rel)
+    check_samples(bcast_rel, MAX_RANK)
 
 
 def test_bcast_examples():
@@ -144,6 +152,7 @@ def test_dense_rel_fuzz():
             ret_shape = generate_return_shape(min_rank=1)
             ranks = generate_dense_arg_ranks(len(ret_shape), units_defined)
             check_all(solvers, (units_defined, ranks, (ret_shape,)), dense_rel)
+    check_samples(dense_rel, MAX_RANK)
 
 
 def test_bias_add_fuzz():
@@ -156,6 +165,7 @@ def test_bias_add_fuzz():
             axis = random.randint(-(ret_rank-1), ret_rank-1)
             ranks = generate_bias_add_arg_ranks(ret_rank)
             check_all(solvers, (axis, ranks, (ret_shape,)), rel)
+    check_samples(rel, MAX_RANK)
 
 
 def test_batch_matmul_fuzz():
@@ -166,6 +176,7 @@ def test_batch_matmul_fuzz():
     for i in range(NUM_ATTEMPTS):
         ret_shape = tuple([random.randint(1, MAX_DIM) for i in range(3)])
         check_all(solvers, (arg_ranks, (ret_shape,)), rel)
+    check_samples(rel, None)
 
 
 def test_batch_norm_fuzz():
@@ -179,6 +190,7 @@ def test_batch_norm_fuzz():
             axis_dim = ret_shape[axis]
             ranks = (ret_rank, 1, 1, 1, 1)
             check_all(solvers, (axis, ranks, (ret_shape, (axis_dim,), (axis_dim,))), rel)
+    check_samples(rel, MAX_RANK)
 
 
 def test_conv2d_fuzz():
@@ -189,6 +201,7 @@ def test_conv2d_fuzz():
     for i in range(NUM_ATTEMPTS):
         ret_shape = tuple([random.randint(1, MAX_DIM) for i in range(4)])
         check_all(solvers, (arg_ranks, (ret_shape,)), rel)
+    check_samples(rel, None)
 
 
 if __name__ == "__main__":

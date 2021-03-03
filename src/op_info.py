@@ -16,14 +16,17 @@ def random_dtype():
     return random.choice(["int8", "int32", "bool", "float32", "float64"])
 
 
-def default_sample(op_info, min_rank=0, max_rank=None):
+def default_sample(op_info, use_solver, min_rank=0, max_rank=None, sample_params=None):
     # really bad default that should really be parameterized
     dtype = random_dtype()
-    ret_rank = random.randint(min_rank,
-                              max_rank if max_rank is not None else 5 + min_rank)
-    # holes to allow free choice
-    shape = tuple([None for d in range(ret_rank)])
-    return op_info.solve_for_types(dtype, shape)
+    if use_solver:
+        ret_rank = random.randint(min_rank,
+                                  max_rank if max_rank is not None else 5 + min_rank)
+        # holes to allow free choice
+        shape = tuple([None for d in range(ret_rank)])
+        return op_info.solve_for_types(dtype, shape)
+    _, solution =  op_info.relation.sample_solution(sample_params)
+    return op_info.pack_solution(dtype, solution)
 
 
 class OpInfo:
@@ -53,7 +56,7 @@ class OpInfo:
         """
         raise NotImplementedError()
 
-    def sample_call(self):
+    def sample_call(self, use_solver=True):
         """
         "Forward solving": With no target return type, produce a valid set of argument and return types.
         Returns (list of argument types, list of return types, any additional parameters)
@@ -83,7 +86,11 @@ class BroadcastingOp(OpInfo):
 
     def solve_for_types(self, dtype, ret_shape):
         arg_ranks = self.generate_broadcast_ranks(len(ret_shape))
-        arg_shapes, return_shapes = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        solution = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        return self.pack_solution(dtype, solution)
+
+    def pack_solution(self, dtype, solution):
+        arg_shapes, return_shapes = solution
         arg_types = [relay.TensorType(arg_shape, dtype) for arg_shape in arg_shapes]
         ret_type = relay.TensorType(return_shapes[0], dtype)
         return arg_types, ret_type, None
@@ -95,8 +102,8 @@ class BroadcastingOp(OpInfo):
         arg_types, _, _ = self.solve_for_types(dtype, shape)
         return arg_types, None
 
-    def sample_call(self):
-        return default_sample(self)
+    def sample_call(self, use_solver=True):
+        return default_sample(self, use_solver, sample_params=5)
 
     def supports_return_type(self, ret_type):
         return isinstance(ret_type, relay.TensorType)
@@ -118,7 +125,11 @@ class IdentityOp(OpInfo):
 
     def solve_for_types(self, dtype, ret_shape):
         arg_ranks = tuple([len(ret_shape) for i in range(self.num_args)])
-        arg_shapes, return_shapes = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        solution = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        return self.pack_solution(dtype, solution)
+
+    def pack_solution(self, dtype, solution):
+        arg_shapes, return_shapes = solution
         arg_types = [relay.TensorType(arg_shape, dtype) for arg_shape in arg_shapes]
         ret_type = relay.TensorType(return_shapes[0], dtype)
         return arg_types, ret_type, None
@@ -136,8 +147,9 @@ class IdentityOp(OpInfo):
         # only expect tensors, but the type relation can support anything)
         return isinstance(ret_type, relay.TensorType)
 
-    def sample_call(self):
-        return default_sample(self)
+    def sample_call(self, use_solver=True):
+        return default_sample(self, use_solver,
+                              sample_params=(5, self.num_args))
 
     def produce_call(self, arg_exprs, additional_params=None):
         return self.constructor(*arg_exprs)
@@ -157,8 +169,8 @@ class ClipInfo(IdentityOp):
         ret, _ = super().generate_arg_types(ret_type)
         return ret, self.generate_additional_params()
 
-    def sample_call(self):
-        arg_types, ret_type, _ = super().sample_call()
+    def sample_call(self, use_solver=True):
+        arg_types, ret_type, _ = super().sample_call(use_solver)
         return arg_types, ret_type, self.generate_additional_params()
 
     def produce_call(self, arg_exprs, additional_params=None):
@@ -177,9 +189,12 @@ class DenseInfo(OpInfo):
 
         # TODO: parameterize this choice
         units_defined = random.choice([True, False])
-        units, arg_shapes, return_shapes = self.solver.solve(
+        solution = self.solver.solve(
             self.relation, (units_defined, arg_ranks, (ret_shape,)))
+        return self.pack_solution(dtype, solution)
 
+    def pack_solution(self, dtype, solution):
+        units, arg_shapes, return_shapes = solution
         # data type rules: can manually set an out data type (casts), otherwise use dtype of data input
         # (for now, we will conservatively give everything the same dtype, which is by far the most common choice, but this is not inherently necessary!)
         arg_types = [
@@ -211,8 +226,8 @@ class DenseInfo(OpInfo):
                 out_dtype = additional_params["out_dtype"]
         return relay.nn.dense(data, weight, units=units, out_dtype=out_dtype)
 
-    def sample_call(self):
-        return default_sample(self, min_rank=1)
+    def sample_call(self, use_solver):
+        return default_sample(self, use_solver, min_rank=1, sample_params=5)
 
     def supports_return_type(self, ty):
         # supports any nonscalar
@@ -232,14 +247,17 @@ class BiasAddInfo(OpInfo):
         # TODO: parameterize this choice
         axis = random.randint(-(ret_rank-1), ret_rank-1)
         arg_ranks = (ret_rank, 1)
-        _, arg_shapes, return_shapes = self.solver.solve(self.relation, (axis, arg_ranks, (ret_shape,)))
+        solution = self.solver.solve(self.relation, (axis, arg_ranks, (ret_shape,)))
+        return self.pack_solution(dtype, solution)
+
+    def pack_solution(self, dtype, solution):
+        axis, arg_shapes, return_shapes = solution
         arg_types = [
             relay.TensorType(arg_shapes[0], dtype),
             relay.TensorType(arg_shapes[1], dtype)
         ]
         return_type = relay.TensorType(return_shapes[0], dtype)
         return arg_types, return_type, axis
-
 
     def generate_arg_types(self, ret_type):
         ret_dtype = ret_type.dtype
@@ -255,8 +273,8 @@ class BiasAddInfo(OpInfo):
             axis = additional_params
         return relay.nn.bias_add(data, weight, axis=axis)
 
-    def sample_call(self):
-        return default_sample(self, min_rank=1)
+    def sample_call(self, use_solver):
+        return default_sample(self, use_solver, min_rank=1, sample_params=5)
 
     def supports_return_type(self, ty):
         # supports any nonscalar
@@ -273,7 +291,11 @@ class BatchMatmulInfo(OpInfo):
 
     def solve_for_types(self, dtype, ret_shape):
         arg_ranks = (3, 3)
-        arg_shapes, return_shapes = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        solution = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        return self.pack_solution(dtype, solution)
+
+    def pack_solution(self, dtype, solution):
+        arg_shapes, return_shapes = solution
         # TODO: technically, the type relation only checks the first arg's dtype so the second can be anything
         arg_types = [
             relay.TensorType(arg_shapes[0], dtype),
@@ -281,7 +303,6 @@ class BatchMatmulInfo(OpInfo):
         ]
         ret_type = relay.TensorType(return_shapes[0], dtype)
         return arg_types, ret_type, None
-
 
     def generate_arg_types(self, ret_type):
         ret_dtype = ret_type.dtype
@@ -292,8 +313,8 @@ class BatchMatmulInfo(OpInfo):
     def produce_call(self, arg_exprs, additional_params=None):
         return relay.nn.batch_matmul(*arg_exprs)
 
-    def sample_call(self):
-        return default_sample(self, min_rank=3, max_rank=3)
+    def sample_call(self, use_solver=True):
+        return default_sample(self, use_solver, min_rank=3, max_rank=3)
 
     def supports_return_type(self, ty):
         # only supports tensors of rank 3
@@ -327,9 +348,13 @@ class BatchNormInfo(OpInfo):
         # TODO: parameterize this choice(?)
         axis = random.choice(self.valid_axes(ret_shape, vec_shapes))
         arg_ranks = (ret_rank, 1, 1, 1, 1)
-        axis, arg_shapes, return_shapes = self.solver.solve(
+        solution = self.solver.solve(
             self.relation,
             (axis, arg_ranks, (ret_shape, *vec_shapes)))
+        return self.pack_solution(ret_dtype, solution)
+
+    def pack_solution(self, ret_dtype, solution):
+        axis, arg_shapes, return_shapes = solution
         arg_types = [
             relay.TensorType(arg_shape, ret_dtype)
             for arg_shape in arg_shapes
@@ -356,14 +381,18 @@ class BatchNormInfo(OpInfo):
             axis = additional_params
         return relay.nn.batch_norm(*arg_exprs, axis=axis).astuple()
 
-    def sample_call(self):
+    def sample_call(self, use_solver=True):
         # TODO: parameterize this generation
         dtype = random_dtype()
-        data_rank = random.randint(1, 5)
-        vec_ranks = [1, 1]
-        data_shape = tuple([None for i in range(data_rank)])
-        vec_shapes = ((None,), (None,))
-        return self.solve_for_types(dtype, data_shape, vec_shapes)
+        if use_solver:
+            data_rank = random.randint(1, 5)
+            vec_ranks = [1, 1]
+            data_shape = tuple([None for i in range(data_rank)])
+            vec_shapes = ((None,), (None,))
+            return self.solve_for_types(dtype, data_shape, vec_shapes)
+        _, solution = self.relation.sample_solution(5)
+        return self.pack_solution(dtype, solution)
+
 
     def supports_return_type(self, ty):
         # tuple of length 3 where dtypes match and some axis is appropriate
@@ -396,7 +425,11 @@ class Conv2DInfo(OpInfo):
     def solve_for_types(self, dtype, ret_shape):
         # TODO: Handle the plethora of optional params eventually
         arg_ranks = (4, 4)
-        arg_shapes, return_shapes = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        solution = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
+        return self.pack_solution(dtype, solution)
+
+    def pack_solution(self, dtype, solution):
+        arg_shapes, return_shapes = solution
         # TODO: handle dtype inference later
         arg_types = [
             relay.TensorType(arg_shape, dtype)
@@ -415,8 +448,8 @@ class Conv2DInfo(OpInfo):
         # going to leave everything at default settings for now
         return relay.nn.conv2d(*arg_exprs)
 
-    def sample_call(self):
-        return default_sample(self, min_rank=4, max_rank=4)
+    def sample_call(self, use_solver=True):
+        return default_sample(self, use_solver, min_rank=4, max_rank=4)
 
     def supports_return_type(self, ty):
         # tensor of rank 4

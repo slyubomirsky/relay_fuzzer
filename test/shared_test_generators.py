@@ -175,6 +175,7 @@ class TestExprGenerator(FuelDriver):
 
         # mapping of type hashes -> arg types, additional params, op_info
         # to produce a call if the appropriate type comes up
+        self.use_forward_solver = not self.config.use_forward_sampling
         self.forward_queue = {}
 
         self.expr_ctor = ExprConstructor(
@@ -212,7 +213,8 @@ class TestExprGenerator(FuelDriver):
     def forward_solve(self):
         # pick an operator, solve for its types, and put it in the queue for the next time the type comes up
         op_info = random.choice(self.all_ops)
-        arg_types, ret_type, params = op_info.sample_call()
+        arg_types, ret_type, params = op_info.sample_call(
+            use_solver=self.use_forward_solver)
         # terrible hack
         ty_hash = tvm.ir.structural_hash(ret_type)
         self.forward_queue[ty_hash] = arg_types, params, op_info
@@ -405,6 +407,7 @@ def validate_config(config):
     "exclude_main": Whether to exclude the "main" variable from appearing in a generated expression.
                     This can lead to problems if reusing preludes (default: True)
     "use_forward_solving": Whether to use forward solving (sample operators to skew generator towards producing operators) (default: True)
+    "use_forward_sampling": Whether to apply forward solving by randomly sampling _without using a solver_ (default: False)
     "fuel": Fuel parameter to control the size of generated expressions (default: 10)
     "type_fuel": Fuel parameter to control the size of generated types (default: fuel)
                  Recommendation: This should probably be lower than the general fuel,
@@ -497,8 +500,10 @@ def validate_config(config):
     set_field(ret, config, "set_seed", False, is_bool)
     set_field(ret, config, "random_seed", 0, lambda i: isinstance(i, int))
     set_field(ret, config, "exclude_main", True, is_bool)
-    # unused for now
+
     set_field(ret, config, "use_forward_solving", True, is_bool)
+    set_field(ret, config, "use_forward_sampling", False, is_bool)
+
 
     set_field(ret, config, "fuel", 10, positive_int)
     set_field(ret, config, "type_fuel", ret.fuel, positive_int)

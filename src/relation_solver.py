@@ -173,6 +173,14 @@ class Relation:
         """
         raise NotImplementedError()
 
+    def sample_solution(self, params):
+        """
+        Generate a random valid solution without the use of a solver
+
+        Returns (problem_instance, solution)
+        """
+        raise NotImplementedError()
+
 
 class Solver:
     """
@@ -352,6 +360,14 @@ class IdentityRelation(Relation):
         shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
+    def sample_solution(self, params):
+        max_rank, num_args = params
+        rank = random.randint(0, max_rank)
+        shape = tuple([random.randint(1, self.max_dim) for d in range(rank)])
+        solution = (tuple([shape for i in range(num_args)]), (shape,))
+        problem = (tuple([rank for i in range(num_args)]), (shape,))
+        return problem, solution
+
 
 class BroadcastRelation(Relation):
     """
@@ -477,6 +493,39 @@ class BroadcastRelation(Relation):
         shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
+    def sample_solution(self, params):
+        max_arity = params
+        arity = random.randint(0, max_arity)
+        ret_shape = tuple([random.randint(1, self.max_dim) for d in range(arity)])
+        # one of the arg shapes must be the arity, one can be shorter
+        short_arity = random.randint(0, arity)
+
+        long_arg = [None for i in range(arity)]
+        short_arg = [None for i in range(short_arity)]
+
+        diff = arity - short_arity
+        for i in range(diff):
+            long_arg[i] = ret_shape[i]
+
+        for i in range(diff, arity):
+            long_dim = ret_shape[i]
+            short_dim = ret_shape[i]
+            # the dimensions can match the return
+            match_dim = random.choice([True, False])
+            if not match_dim:
+                # if they don't match, one must match and the other must be 1
+                pick_short = random.choice([True, False])
+                if pick_short:
+                    long_dim = 1
+                else:
+                    short_dim = 1
+            long_arg[i] = long_dim
+            short_arg[i - diff] = short_dim
+
+        solution = ((tuple(long_arg), tuple(short_arg)), (ret_shape,))
+        problem = ((arity, short_arity), (ret_shape,))
+        return problem, solution
+
 
 class DenseRelation(Relation):
     """
@@ -580,6 +629,21 @@ class DenseRelation(Relation):
             units = int(units.x)
         return units, arg_shapes, ret_shapes
 
+    def sample_solution(self, params):
+        max_rank = params
+        rank = random.randint(1, max_rank)
+        units_defined = random.choice([True, False])
+        ret_shape = tuple([random.randint(1, self.max_dim) for i in range(rank)])
+        data_shape = tuple([*ret_shape[:-1], random.randint(1, self.max_dim)])
+        unit_dim = None
+        if units_defined:
+            unit_dim = ret_shape[-1]
+        weight_shape = (ret_shape[-1], data_shape[-1])
+
+        problem = (units_defined, (rank, rank), (ret_shape,))
+        solution = (unit_dim, (data_shape, weight_shape), (ret_shape,))
+        return problem, solution
+
 
 class BiasAddRelation(Relation):
     """
@@ -661,6 +725,17 @@ class BiasAddRelation(Relation):
         arg_shapes, ret_shapes = marshal_ilp_shapes(shape_vars, return_shapes)
         return (axis, arg_shapes, ret_shapes)
 
+    def sample_solution(self, params):
+        max_rank = params
+        rank = random.randint(1, max_rank)
+        axis = random.randint(0, rank-1)
+        data_shape = tuple([random.randint(1, self.max_dim) for i in range(rank)])
+        axis_vec = (data_shape[axis],)
+
+        problem = (axis, (rank, 1), (data_shape,))
+        solution = (axis, (data_shape, axis_vec), (data_shape,))
+        return problem, solution
+
 
 class BatchMatmulRelation(Relation):
     """
@@ -740,6 +815,19 @@ class BatchMatmulRelation(Relation):
         shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
+    def sample_solution(self, params):
+        x = tuple([random.randint(1, self.max_dim) for i in range(3)])
+        y = tuple([
+            1 if random.choice([True, False]) else x[0],
+            random.randint(1, self.max_dim),
+            x[2]
+        ])
+        ret_shape = (max(x[0], y[0]), x[1], y[1])
+
+        problem = ((3, 3), (ret_shape,))
+        solution = ((x, y), (ret_shape,))
+        return problem, solution
+
 
 class BatchNormRelation(Relation):
     """
@@ -779,6 +867,8 @@ class BatchNormRelation(Relation):
             return False
 
         normed_rank = len(return_shapes[0])
+        if normed_rank == 0:
+            return False
         axis_dim = self.get_axis_dim(axis, return_shapes[0])
 
         running_mean = return_shapes[1]
@@ -834,6 +924,20 @@ class BatchNormRelation(Relation):
         axis, shape_vars, return_shapes = ilp_problem
         arg_shapes, ret_shapes = marshal_ilp_shapes(shape_vars, return_shapes)
         return axis, arg_shapes, ret_shapes
+
+    def sample_solution(self, params):
+        max_rank = params
+        rank = random.randint(1, max_rank)
+        data_shape = tuple([random.randint(1, self.max_dim) for i in range(rank)])
+        axis = random.randint(-1, len(data_shape)-1)
+        axis_dim = data_shape[axis]
+        arg_vec = (axis_dim,)
+        arg_shapes = (data_shape, arg_vec, arg_vec, arg_vec, arg_vec)
+        ret_shapes = (data_shape, arg_vec, arg_vec)
+
+        problem = (axis, (rank, 1, 1, 1, 1), ret_shapes)
+        solution = (axis, arg_shapes, ret_shapes)
+        return problem, solution
 
 
 class Conv2DRelation(Relation):
@@ -936,5 +1040,23 @@ class Conv2DRelation(Relation):
         shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
+    def sample_solution(self, params):
+        N = random.randint(1, self.max_dim)
+        C_in = random.randint(1, self.max_dim)
+        C_out = random.randint(1, self.max_dim)
+        H_in = random.randint(1, self.max_dim)
+        W_in = random.randint(1, self.max_dim)
+        k_h = random.randint(1, self.max_dim)
+        k_w = random.randint(1, self.max_dim)
+        H_out = H_in - (k_h - 1)
+        W_out = W_in - (k_w - 1)
+
+        data_shape = (N, C_in, H_in, W_in)
+        weight_shape = (C_out, C_in, k_h, k_w)
+        out_shape = (N, C_out, H_out, W_out)
+
+        problem = ((4, 4), (out_shape,))
+        solution = ((data_shape, weight_shape), (out_shape,))
+        return problem, solution
 
 # TODO: Add more

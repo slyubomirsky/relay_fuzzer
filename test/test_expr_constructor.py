@@ -34,6 +34,14 @@ def generate_expr(prelude, ty, seed):
         print(gen.get_solver_profile())
     return ret
 
+def generate_with_forward_solver(prelude, seed, conf=None):
+    gen = TestExprGenerator(prelude, conf=conf)
+    gen.set_seed(seed)
+    ty = gen.forward_solve()
+    expr = gen.generate_expr(ty)
+    if gen.get_solver_profile():
+        print(gen.get_solver_profile())
+    check_well_formed(prelude, expr, ty)
 
 # we should try finer-grained tests than only this
 def test_fuzz():
@@ -52,13 +60,17 @@ def test_fuzz_forward_solve():
     prelude = relay.prelude.Prelude()
     for i in range(NUM_ATTEMPTS):
         start = time.time()
-        gen = TestExprGenerator(prelude)
-        gen.set_seed(i)
-        ty = gen.forward_solve()
-        expr = gen.generate_expr(ty)
-        if gen.get_solver_profile():
-            print(gen.get_solver_profile())
-        check_well_formed(prelude, expr, ty)
+        generate_with_forward_solver(prelude, i)
+        end = time.time()
+        print(f"Iter time: {end - start}")
+
+
+def test_fuzz_forward_sampling():
+    prelude = relay.prelude.Prelude()
+    conf = {"use_forward_sampling": True}
+    for i in range(NUM_ATTEMPTS):
+        start = time.time()
+        generate_with_forward_solver(prelude, i, conf=conf)
         end = time.time()
         print(f"Iter time: {end - start}")
 
@@ -66,3 +78,4 @@ def test_fuzz_forward_solve():
 if __name__ == "__main__":
     test_fuzz()
     test_fuzz_forward_solve()
+    test_fuzz_forward_sampling()
