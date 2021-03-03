@@ -128,20 +128,23 @@ class Relation:
         """
         raise NotImplementedError()
 
-    def produce_ilp_constraints(self, solver, problem_instance, ilp_vars):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         """
-        As the name implies, adds appropriate ILP constraints using the solver,
-        based on the given problem instance.
-
-        Returns an ILP solution template that should be marshaled
-        into a solution object below
+        Turns an input problem instance into an ILP problem instance
         """
         raise NotImplementedError()
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
+    def produce_ilp_constraints(self, solver, ilp_problem_instance):
         """
-        Given the problem instance and the ilp solution produced,
-        turn it into a solution instance that can be checked with check()
+        As the name implies, adds appropriate ILP constraints using the solver,
+        based on the given problem instance.
+        """
+        raise NotImplementedError()
+
+    def marshal_ilp_solution(self, ilp_problem):
+        """
+        Given ilp problem, it should contain a solution after running the solver;
+        this will turn it into a solution instance that can be checked with check()
         """
         raise NotImplementedError()
 
@@ -199,13 +202,14 @@ class ILPSolver(Solver):
         if not relation.validate(problem_instance):
             raise ValueError("Relation invalid for the given problem_instance")
 
-        ilp_solution = relation.produce_ilp_constraints(self.m, problem_instance)
+        ilp_problem = relation.convert_to_ilp_problem(self.m, problem_instance)
+        relation.produce_ilp_constraints(self.m, ilp_problem)
 
         res = self.m.optimize(max_seconds=self.max_time)
         if not self.found_ilp_solution(res):
             raise ValueError("No solution found (infeasible)")
 
-        return relation.marshal_ilp_solution(problem_instance, ilp_solution)
+        return relation.marshal_ilp_solution(ilp_problem)
 
 
 class MemoizedSolver(Solver):
@@ -302,22 +306,24 @@ class IdentityRelation(Relation):
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
             yield (arg_shapes, return_shapes)
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         arg_ranks, return_shapes = problem_instance
         shape_vars = [
             [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
              for i in range(rank)]
             for rank in arg_ranks
         ]
+        return shape_vars, return_shapes
+
+    def produce_ilp_constraints(self, solver, ilp_problem):
+        arg_shapes, return_shapes = ilp_problem
         sol_shape = return_shapes[0]
-        for shape in shape_vars:
+        for shape in arg_shapes:
             for i in range(len(shape)):
                 solver += (shape[i] == sol_shape[i])
-        return shape_vars
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
-        _, return_shapes = problem_instance
-        shape_vars = ilp_solution
+    def marshal_ilp_solution(self, ilp_problem):
+        shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
 
@@ -393,15 +399,18 @@ class BroadcastRelation(Relation):
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
             yield (arg_shapes, return_shapes)
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         arg_ranks, return_shapes = problem_instance
         shape_vars = [
             [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        a0 = shape_vars[0]
-        a1 = shape_vars[1]
+        return shape_vars, return_shapes
+
+    def produce_ilp_constraints(self, solver, ilp_problem):
+        shape_vars, return_shapes = ilp_problem
+        a0, a1 = shape_vars[0], shape_vars[1]
         sol_shape = return_shapes[0]
 
         min_rank = min(len(a0), len(a1))
@@ -436,11 +445,9 @@ class BroadcastRelation(Relation):
             neither_is_1 = add_and_constraint(solver, 1-a0_elt_eq_1, 1-a1_elt_eq_1)
             solver += (a1_elt_eq_a0_elt >= neither_is_1)
             solver += (bc_eq_a0_elt >= neither_is_1)
-        return shape_vars
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
-        _, return_shapes = problem_instance
-        shape_vars = ilp_solution
+    def marshal_ilp_solution(self, ilp_problem):
+        shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
 
@@ -513,30 +520,33 @@ class DenseRelation(Relation):
                 return False
         return True
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         units_defined, arg_ranks, return_shapes = problem_instance
         shape_vars = [
             [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
              for i in range(rank)]
             for rank in arg_ranks
         ]
+        unit_var = None
+        if units_defined:
+            unit_var = solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
+        return unit_var, shape_vars, return_shapes
+
+    def produce_ilp_constraints(self, solver, ilp_problem):
+        unit_var, shape_vars, return_shapes = ilp_problem
         data_shape = shape_vars[0]
         weight_shape = shape_vars[1]
         sol_shape = return_shapes[0]
 
-        unit_var = None
-        if units_defined:
-            unit_var = solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
+        if unit_var is not None:
             solver += (unit_var == weight_shape[0])
         solver += (sol_shape[-1] == weight_shape[0])
         solver += (weight_shape[1] == data_shape[-1])
         for i in range(len(data_shape) - 1):
             solver += (sol_shape[i] == data_shape[i])
-        return shape_vars, unit_var
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
-        _, _, return_shapes = problem_instance
-        shape_vars, units = ilp_solution
+    def marshal_ilp_solution(self, ilp_problem):
+        units, shape_vars, return_shapes = ilp_problem
         arg_shapes, ret_shapes = marshal_ilp_shapes(shape_vars, return_shapes)
         if units is not None:
             units = int(units.x)
@@ -597,13 +607,17 @@ class BiasAddRelation(Relation):
                 return False
         return weight[0] == sol_shape[axis_idx]
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         axis, arg_ranks, return_shapes = problem_instance
         shape_vars = [
             [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
              for i in range(rank)]
             for rank in arg_ranks
         ]
+        return axis, shape_vars, return_shapes
+
+    def produce_ilp_constraints(self, solver, ilp_problem):
+        axis, shape_vars, return_shapes = ilp_problem
         data_shape = shape_vars[0]
         weight_shape = shape_vars[1]
         sol_shape = return_shapes[0]
@@ -612,11 +626,9 @@ class BiasAddRelation(Relation):
         for i in range(len(sol_shape)):
             solver += (sol_shape[i] == data_shape[i])
         solver += (weight_shape[0] == data_shape[axis_idx])
-        return shape_vars
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
-        axis, _, return_shapes = problem_instance
-        shape_vars = ilp_solution
+    def marshal_ilp_solution(self, ilp_problem):
+        axis, shape_vars, return_shapes = ilp_problem
         arg_shapes, ret_shapes = marshal_ilp_shapes(shape_vars, return_shapes)
         return (axis, arg_shapes, ret_shapes)
 
@@ -661,13 +673,17 @@ class BatchMatmulRelation(Relation):
                 and x[2] == y[2]
                 and (y[0] == 1 or x[0] == 1 or y[0] == x[0]))
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         arg_ranks, return_shapes = problem_instance
         shape_vars = [
             [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
              for i in range(rank)]
             for rank in arg_ranks
         ]
+        return shape_vars, return_shapes
+
+    def produce_ilp_constraints(self, solver, ilp_problem):
+        shape_vars, return_shapes = ilp_problem
         x_shape = shape_vars[0]
         y_shape = shape_vars[1]
         sol_shape = return_shapes[0]
@@ -689,11 +705,9 @@ class BatchMatmulRelation(Relation):
         solver += (sol_shape[1] == x_shape[1])
         solver += (sol_shape[2] == y_shape[1])
         solver += (x_shape[2] == y_shape[2])
-        return shape_vars
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
-        _, return_shapes = problem_instance
-        shape_vars = ilp_solution
+    def marshal_ilp_solution(self, ilp_problem):
+        shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
 
@@ -764,13 +778,17 @@ class BatchNormRelation(Relation):
                 return False
         return True
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         axis, arg_ranks, return_shapes = problem_instance
         shape_vars = [
             [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
              for i in range(rank)]
             for rank in arg_ranks
         ]
+        return axis, shape_vars, return_shapes
+
+    def produce_ilp_constraints(self, solver, ilp_problem):
+        axis, shape_vars, return_shapes = ilp_problem
         normed_data = return_shapes[0]
         axis_dim = self.get_axis_dim(axis, normed_data)
 
@@ -780,11 +798,9 @@ class BatchNormRelation(Relation):
             solver += (d == normed_data[i])
         for vec in input_vecs:
             solver += (vec[0] == axis_dim)
-        return shape_vars
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
-        axis, _, return_shapes = problem_instance
-        shape_vars = ilp_solution
+    def marshal_ilp_solution(self, ilp_problem):
+        axis, shape_vars, return_shapes = ilp_problem
         arg_shapes, ret_shapes = marshal_ilp_shapes(shape_vars, return_shapes)
         return axis, arg_shapes, ret_shapes
 
@@ -855,13 +871,17 @@ class Conv2DRelation(Relation):
         expected_w_out = compute_out_dim(W_in, padding[1], dilation[1], k_w, stride[1])
         return H_out == expected_h_out and W_out == expected_w_out
 
-    def produce_ilp_constraints(self, solver, problem_instance):
+    def convert_to_ilp_problem(self, solver, problem_instance):
         arg_ranks, return_shapes = problem_instance
         shape_vars = [
             [solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
              for i in range(rank)]
             for rank in arg_ranks
         ]
+        return shape_vars, return_shapes
+
+    def produce_ilp_constraints(self, solver, ilp_problem):
+        shape_vars, return_shapes = ilp_problem
         M = self.max_dim + 1
 
         N_o, C_out_o, H_out, W_out = return_shapes[0]
@@ -880,9 +900,8 @@ class Conv2DRelation(Relation):
         solver += (W_out == expected_w_out)
         return shape_vars
 
-    def marshal_ilp_solution(self, problem_instance, ilp_solution):
-        _, return_shapes = problem_instance
-        shape_vars = ilp_solution
+    def marshal_ilp_solution(self, ilp_problem):
+        shape_vars, return_shapes = ilp_problem
         return marshal_ilp_shapes(shape_vars, return_shapes)
 
 
