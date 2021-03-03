@@ -11,11 +11,7 @@ MAX_RANK = 10
 MAX_DIM = 10
 NUM_ATTEMPTS = 10
 
-def check_op_setup(op_info, ret_type):
-    # make sure the result type checks
-    assert op_info.supports_return_type(ret_type)
-    arg_types, additional_params = op_info.generate_arg_types(ret_type)
-
+def validate_types(op_info, arg_types, ret_type, additional_params):
     arg_vars = [
         relay.Var(f"v_{i}", type_annotation=arg_type)
         for i, arg_type in enumerate(arg_types)
@@ -29,6 +25,19 @@ def check_op_setup(op_info, ret_type):
         mod = relay.transform.InferType()(mod)
     except Exception as e:
         assert False, f"{func} fails to type check"
+
+
+def check_op_setup(op_info, ret_type):
+    # make sure the result type checks
+    assert op_info.supports_return_type(ret_type)
+    arg_types, additional_params = op_info.generate_arg_types(ret_type)
+    validate_types(op_info, arg_types, ret_type, additional_params)
+
+
+def check_sampled_types(op_info):
+    arg_types, ret_type, additional_params = op_info.sample_call()
+    assert op_info.supports_return_type(ret_type)
+    validate_types(op_info, arg_types, ret_type, additional_params)
 
 
 def generate_return_shape(min_rank=0):
@@ -52,6 +61,8 @@ def test_basic_ops():
             dtype = generate_dtype()
             ret_type = relay.TensorType(shape, dtype)
             check_op_setup(op_info, ret_type)
+        for i in range(NUM_ATTEMPTS):
+            check_sampled_types(op_info)
 
 
 def test_nonscalar_ops():
@@ -66,6 +77,8 @@ def test_nonscalar_ops():
             dtype = generate_dtype()
             ret_type = relay.TensorType(shape, dtype)
             check_op_setup(op_info, ret_type)
+        for i in range(NUM_ATTEMPTS):
+            check_sampled_types(op_info)
 
 
 def test_batch_matmul():
@@ -77,6 +90,8 @@ def test_batch_matmul():
         dtype = generate_dtype()
         ret_type = relay.TensorType(shape, dtype)
         check_op_setup(op_info, ret_type)
+    for i in range(NUM_ATTEMPTS):
+        check_sampled_types(op_info)
 
 
 def test_batch_norm():
@@ -95,6 +110,8 @@ def test_batch_norm():
                 relay.TensorType(vec_shape, dtype)
             ])
             check_op_setup(op_info, ret_type)
+    for i in range(NUM_ATTEMPTS):
+        check_sampled_types(op_info)
 
 
 def test_conv2d():
@@ -105,6 +122,8 @@ def test_conv2d():
         dtype = generate_dtype()
         ret_type = relay.TensorType(shape, dtype)
         check_op_setup(op_info, ret_type)
+    for i in range(NUM_ATTEMPTS):
+        check_sampled_types(op_info)
 
 
 if __name__ == "__main__":
