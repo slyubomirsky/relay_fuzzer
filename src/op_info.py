@@ -58,14 +58,14 @@ class BroadcastingOp(OpInfo):
         other_rank = random.randint(0, max_rank)
         ranks = [other_rank, max_rank]
         random.shuffle(ranks)
-        return ranks
+        return tuple(ranks)
 
     def generate_arg_types(self, ret_type):
         assert isinstance(ret_type, relay.TensorType)
         dtype = ret_type.dtype
         shape = tuple([int(d) for d in ret_type.shape])
         arg_ranks = self.generate_broadcast_ranks(len(shape))
-        arg_shapes = self.solver.solve(arg_ranks, [shape], self.relation)
+        arg_shapes, _ = self.solver.solve(self.relation, (arg_ranks, (shape,)))
         ret = [relay.TensorType(arg_shape, dtype) for arg_shape in arg_shapes]
         return ret, None
 
@@ -91,8 +91,8 @@ class IdentityOp(OpInfo):
         assert isinstance(ret_type, relay.TensorType)
         dtype = ret_type.dtype
         shape = tuple([int(d) for d in ret_type.shape])
-        arg_ranks = [len(shape) for i in range(self.num_args)]
-        arg_shapes = self.solver.solve(arg_ranks, [shape], self.relation)
+        arg_ranks = tuple([len(shape) for i in range(self.num_args)])
+        arg_shapes, _ = self.solver.solve(self.relation, (arg_ranks, (shape,)))
         ret = [relay.TensorType(arg_shape, dtype) for arg_shape in arg_shapes]
         return ret, None
 
@@ -124,24 +124,20 @@ class ClipInfo(IdentityOp):
 
 
 class DenseInfo(OpInfo):
-    def __init__(self, max_dim, solver, units_defined):
+    def __init__(self, max_dim, solver):
         self.max_dim = max_dim
         self.solver = solver
-        self.units_defined = units_defined
-        self.relation = DenseRelation(max_dim, units_defined)
+        self.relation = DenseRelation(max_dim)
 
     def generate_arg_types(self, ret_type):
         ret_dtype = ret_type.dtype
         ret_shape = tuple([int(d) for d in ret_type.shape])
-        arg_ranks = [len(ret_shape), 2]
-        if self.units_defined:
-            arg_ranks.append(1)
-        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], self.relation)
-        additional_params = None
-        if self.units_defined:
-            additional_params = {
-                "units": arg_shapes[2][0]
-            }
+        arg_ranks = (len(ret_shape), 2)
+
+        # TODO: parameterize this choice
+        units_defined = random.choice([True, False])
+        units, arg_shapes, _ = self.solver.solve(self.relation,
+                                                 (units_defined, arg_ranks, (ret_shape,)))
 
         # data type rules: can manually set an out data type (casts), otherwise use dtype of data input
         # (for now, we will conservatively give everything the same dtype, which is by far the most common choice, but this is not inherently necessary!)
@@ -149,6 +145,12 @@ class DenseInfo(OpInfo):
             relay.TensorType(arg_shapes[0], ret_dtype),
             relay.TensorType(arg_shapes[1], ret_dtype)
         ]
+
+        additional_params = None
+        if units is not None:
+            additional_params = {
+                "units": units
+            }
 
         return arg_types, additional_params
 
@@ -175,6 +177,7 @@ class BiasAddInfo(OpInfo):
     def __init__(self, max_dim, solver):
         self.max_dim = max_dim
         self.solver = solver
+        self.relation = BiasAddRelation(self.max_dim)
 
     def generate_arg_types(self, ret_type):
         ret_dtype = ret_type.dtype
@@ -182,9 +185,8 @@ class BiasAddInfo(OpInfo):
         ret_rank = len(ret_shape)
         # TODO: parameterize this choice
         axis = random.randint(-(ret_rank-1), ret_rank-1)
-        rel = BiasAddRelation(self.max_dim, axis)
-        arg_ranks = [ret_rank, 1]
-        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], rel)
+        arg_ranks = (ret_rank, 1)
+        _, arg_shapes, _ = self.solver.solve(self.relation, (axis, arg_ranks, (ret_shape,)))
         arg_types = [
             relay.TensorType(arg_shapes[0], ret_dtype),
             relay.TensorType(arg_shapes[1], ret_dtype)
@@ -215,8 +217,8 @@ class BatchMatmulInfo(OpInfo):
     def generate_arg_types(self, ret_type):
         ret_dtype = ret_type.dtype
         ret_shape = tuple([int(d) for d in ret_type.shape])
-        arg_ranks = [3, 3]
-        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], self.relation)
+        arg_ranks = (3, 3)
+        arg_shapes, _ = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
         # TODO: technically, the type relation only checks the first arg's dtype so the second can be anything
         arg_types = [
             relay.TensorType(arg_shapes[0], ret_dtype),
@@ -238,6 +240,7 @@ class BatchNormInfo(OpInfo):
     def __init__(self, max_dim, solver):
         self.max_dim = max_dim
         self.solver = solver
+        self.relation = BatchNormRelation(self.max_dim)
 
     def valid_axes(self, data_shape, vector_shapes):
         data_rank = len(data_shape)
@@ -260,10 +263,10 @@ class BatchNormInfo(OpInfo):
 
         # TODO: parameterize this choice(?)
         axis = random.choice(self.valid_axes(ret_shape, vec_shapes))
-        rel = BatchNormRelation(self.max_dim, axis)
-
-        arg_ranks = [ret_rank, 1, 1, 1, 1]
-        arg_shapes = self.solver.solve(arg_ranks, [ret_shape] + vec_shapes, rel)
+        arg_ranks = (ret_rank, 1, 1, 1, 1)
+        _, arg_shapes, _ = self.solver.solve(
+            self.relation,
+            (axis, arg_ranks, (ret_shape, *vec_shapes)))
         arg_types = [
             relay.TensorType(arg_shape, ret_dtype)
             for arg_shape in arg_shapes
@@ -309,8 +312,8 @@ class Conv2DInfo(OpInfo):
         ret_shape = tuple([int(d) for d in ret_type.shape])
 
         # TODO: Handle the plethora of optional params eventually
-        arg_ranks = [4, 4]
-        arg_shapes = self.solver.solve(arg_ranks, [ret_shape], self.relation)
+        arg_ranks = (4, 4)
+        arg_shapes, _ = self.solver.solve(self.relation, (arg_ranks, (ret_shape,)))
         # TODO: handle dtype inference later
         arg_types = [
             relay.TensorType(arg_shape, ret_dtype)
@@ -364,12 +367,7 @@ def initialize_identity_ops():
 
 
 def initialize_nonscalar_ops():
-    # ops that can return any tensor type except a scalar
-    def construct_dense_call(use_units):
-        def dense_call(max_dim, solver):
-            return DenseInfo(max_dim, solver, use_units)
-        return dense_call
-    return [construct_dense_call(True), construct_dense_call(False), BiasAddInfo]
+    return [DenseInfo, BiasAddInfo]
 
 
 ALL_BROADCASTING_OPS = initialize_broadcasting_ops()
