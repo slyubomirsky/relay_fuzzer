@@ -485,7 +485,7 @@ def initialize_identity_ops():
         return define_identity_op(1, ctor)
 
     ret = list(map(construct_unary_op_call, (
-        relay.ceil, relay.floor, relay.trunc, relay.sign, relay.logical_not,
+        relay.nn.relu, relay.ceil, relay.floor, relay.trunc, relay.sign, relay.logical_not,
         relay.log, relay.log10, relay.log2
     )))
     ret.append(ClipInfo)
