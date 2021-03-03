@@ -11,7 +11,11 @@ NUM_ATTEMPTS = 5
 
 def generate_return_shape(min_rank=0):
     rank = random.randint(min_rank, MAX_RANK)
-    return tuple([random.randint(1, MAX_DIM) for i in range(rank)])
+    # we'll insert holes to make sure they work
+    return tuple([
+        (random.randint(1, MAX_DIM) if random.choice([True, False]) else None)
+        for i in range(rank)
+    ])
 
 
 def generate_identity_arg_ranks(max_args, ret_rank):

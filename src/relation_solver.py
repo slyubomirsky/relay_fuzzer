@@ -10,6 +10,7 @@ import mip
 import random
 from mip import Model, BINARY, INTEGER
 
+# TODO split this into multiple files
 
 def enumerate_all_possible_shapes(ranks, max_dim):
     all_shapes = []
@@ -26,6 +27,30 @@ def enumerate_all_possible_shapes(ranks, max_dim):
             possible_shapes += itertools.permutations(combo, len(combo))
         all_shapes.append(possible_shapes)
     return itertools.product(*all_shapes)
+
+
+def enumerate_shapes_with_holes(shapes, max_dim):
+    def shape_combination(shape):
+        elements = []
+        for dim in shape:
+            if dim is not None:
+                elements.append((dim,))
+                continue
+            elements.append(tuple(range(1, max_dim+1)))
+        return tuple(itertools.product(*elements))
+    return itertools.product(*[shape_combination(s) for s in shapes])
+
+
+def holes_to_ilp_vars(solver, shapes, max_dim):
+    return tuple([
+        tuple([
+            (dim if isinstance(dim, int)
+             else solver.add_var(var_type=INTEGER, lb=1, ub=max_dim))
+            for dim in shape
+        ])
+        for shape in shapes
+    ])
+
 
 def marshal_ilp_shapes(arg_shapes, return_shapes):
     def instantiate_ilp_vars(shape):
@@ -304,7 +329,8 @@ class IdentityRelation(Relation):
     def all_possible_solutions(self, problem_instance):
         arg_ranks, return_shapes = problem_instance
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
-            yield (arg_shapes, return_shapes)
+            for ret_shapes in enumerate_shapes_with_holes(return_shapes, self.max_dim):
+                yield (arg_shapes, ret_shapes)
 
     def convert_to_ilp_problem(self, solver, problem_instance):
         arg_ranks, return_shapes = problem_instance
@@ -313,7 +339,7 @@ class IdentityRelation(Relation):
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        return shape_vars, return_shapes
+        return shape_vars, holes_to_ilp_vars(solver, return_shapes, self.max_dim)
 
     def produce_ilp_constraints(self, solver, ilp_problem):
         arg_shapes, return_shapes = ilp_problem
@@ -397,7 +423,8 @@ class BroadcastRelation(Relation):
     def all_possible_solutions(self, problem_instance):
         arg_ranks, return_shapes = problem_instance
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
-            yield (arg_shapes, return_shapes)
+            for ret_shapes in enumerate_shapes_with_holes(return_shapes, self.max_dim):
+                yield (arg_shapes, ret_shapes)
 
     def convert_to_ilp_problem(self, solver, problem_instance):
         arg_ranks, return_shapes = problem_instance
@@ -406,7 +433,7 @@ class BroadcastRelation(Relation):
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        return shape_vars, return_shapes
+        return shape_vars, holes_to_ilp_vars(solver, return_shapes, self.max_dim)
 
     def produce_ilp_constraints(self, solver, ilp_problem):
         shape_vars, return_shapes = ilp_problem
@@ -474,11 +501,12 @@ class DenseRelation(Relation):
     def all_possible_solutions(self, problem_instance):
         units_defined, arg_ranks, return_shapes = problem_instance
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
-            if not units_defined:
-                yield (None, arg_shapes, return_shapes)
-            if units_defined:
-                for i in range(1, self.max_dim+1):
-                    yield (i, arg_shapes, return_shapes)
+            for ret_shapes in enumerate_shapes_with_holes(return_shapes, self.max_dim):
+                if not units_defined:
+                    yield (None, arg_shapes, ret_shapes)
+                else:
+                    for i in range(1, self.max_dim+1):
+                        yield (i, arg_shapes, ret_shapes)
 
     def validate(self, problem_instance):
         _, arg_ranks, return_shapes = problem_instance
@@ -530,7 +558,7 @@ class DenseRelation(Relation):
         unit_var = None
         if units_defined:
             unit_var = solver.add_var(var_type=INTEGER, lb=1, ub=self.max_dim)
-        return unit_var, shape_vars, return_shapes
+        return unit_var, shape_vars, holes_to_ilp_vars(solver, return_shapes, self.max_dim)
 
     def produce_ilp_constraints(self, solver, ilp_problem):
         unit_var, shape_vars, return_shapes = ilp_problem
@@ -593,7 +621,8 @@ class BiasAddRelation(Relation):
         # TODO: enumerate over axes too
         axis, arg_ranks, return_shapes = problem_instance
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
-            yield (axis, arg_shapes, return_shapes)
+            for ret_shapes in enumerate_shapes_with_holes(return_shapes, self.max_dim):
+                yield (axis, arg_shapes, ret_shapes)
 
     def check(self, _, solution):
         axis, arg_shapes, return_shapes = solution
@@ -614,7 +643,7 @@ class BiasAddRelation(Relation):
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        return axis, shape_vars, return_shapes
+        return axis, shape_vars, holes_to_ilp_vars(solver, return_shapes, self.max_dim)
 
     def produce_ilp_constraints(self, solver, ilp_problem):
         axis, shape_vars, return_shapes = ilp_problem
@@ -652,7 +681,8 @@ class BatchMatmulRelation(Relation):
     def all_possible_solutions(self, problem_instance):
         arg_ranks, return_shapes = problem_instance
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
-            yield (arg_shapes, return_shapes)
+            for ret_shapes in enumerate_shapes_with_holes(return_shapes, self.max_dim):
+                yield (arg_shapes, ret_shapes)
 
     def validate(self, problem_instance):
         arg_ranks, return_shapes = problem_instance
@@ -680,7 +710,7 @@ class BatchMatmulRelation(Relation):
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        return shape_vars, return_shapes
+        return shape_vars, holes_to_ilp_vars(solver, return_shapes, self.max_dim)
 
     def produce_ilp_constraints(self, solver, ilp_problem):
         shape_vars, return_shapes = ilp_problem
@@ -731,7 +761,8 @@ class BatchNormRelation(Relation):
         # TODO: enumerate over axes too
         axis, arg_ranks, return_shapes = problem_instance
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
-            yield (axis, arg_shapes, return_shapes)
+            for ret_shapes in enumerate_shapes_with_holes(return_shapes, self.max_dim):
+                yield (axis, arg_shapes, ret_shapes)
 
     def get_axis_dim(self, axis, return_data):
         normed_rank = len(return_data)
@@ -785,7 +816,7 @@ class BatchNormRelation(Relation):
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        return axis, shape_vars, return_shapes
+        return axis, shape_vars, holes_to_ilp_vars(solver, return_shapes, self.max_dim)
 
     def produce_ilp_constraints(self, solver, ilp_problem):
         axis, shape_vars, return_shapes = ilp_problem
@@ -836,7 +867,8 @@ class Conv2DRelation(Relation):
     def all_possible_solutions(self, problem_instance):
         arg_ranks, return_shapes = problem_instance
         for arg_shapes in enumerate_all_possible_shapes(arg_ranks, self.max_dim):
-            yield (arg_shapes, return_shapes)
+            for ret_shapes in enumerate_shapes_with_holes(return_shapes, self.max_dim):
+                yield (arg_shapes, ret_shapes)
 
     def check(self, _, solution):
         # taking a very conservative approach for now,
@@ -878,7 +910,7 @@ class Conv2DRelation(Relation):
              for i in range(rank)]
             for rank in arg_ranks
         ]
-        return shape_vars, return_shapes
+        return shape_vars, holes_to_ilp_vars(solver, return_shapes, self.max_dim)
 
     def produce_ilp_constraints(self, solver, ilp_problem):
         shape_vars, return_shapes = ilp_problem
