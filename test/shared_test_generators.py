@@ -170,6 +170,12 @@ class TestExprGenerator(FuelDriver):
         # ditto conv2d for rank 4
         self.rank_4_ops = self.config.rank_4_ops
         self.batch_norm_info = self.config.batch_norm_info
+        # convenient for forward solving
+        self.all_ops = self.config.all_ops
+
+        # mapping of type hashes -> arg types, additional params, op_info
+        # to produce a call if the appropriate type comes up
+        self.forward_queue = {}
 
         self.expr_ctor = ExprConstructor(
             self.var_scope, self.generate_expr, self.generate_type, self.choose_ctor,
@@ -182,6 +188,10 @@ class TestExprGenerator(FuelDriver):
         self.ref_write_chance = 0.05
         # operators are more fun so we will want those to happen more often
         self.operator_chance = 0.25
+        # may need to fiddle with it so as not to skew too much
+        self.forward_solving_chance = 0.5
+        # another option: always use the forward queue but destroy it so we don't become overly reliant on it
+        self.use_forward_queue_chance = 0.5
 
     def set_seed(self, seed):
         self.config.reset_seed(seed)
@@ -192,9 +202,29 @@ class TestExprGenerator(FuelDriver):
     def generate_type(self, gen_params=None):
         gen = self.config.produce_type_generator(self.prelude)
         if gen_params is None:
+            # if we're free to do as we like, let's forward-solve
+            if (self.config.use_forward_solving and random.random() < self.forward_solving_chance):
+                return self.forward_solve()
             return gen.generate_type()
         # TODO: Fix the interface for generate type
         return gen.ctor.construct_type(gen_params=gen_params)
+
+    def forward_solve(self):
+        # pick an operator, solve for its types, and put it in the queue for the next time the type comes up
+        op_info = random.choice(self.all_ops)
+        arg_types, ret_type, params = op_info.sample_call()
+        # terrible hack
+        ty_hash = tvm.ir.structural_hash(ret_type)
+        self.forward_queue[ty_hash] = arg_types, params, op_info
+        return ret_type
+
+    def hit_forward_queue(self, ty):
+        if not self.config.use_forward_solving:
+            return False
+        if not self.has_available_op_calls(ty):
+            return False
+        ty_hash = tvm.ir.structural_hash(ty)
+        return ty_hash in self.forward_queue
 
     def choose_ctor(self, type_call):
         # passing our fuel here because there is the potential
@@ -235,6 +265,10 @@ class TestExprGenerator(FuelDriver):
         return TestPatternGenerator(self.var_scope, self.prelude).generate_patterns(ty)
 
     def generate_op(self, ty):
+        if self.hit_forward_queue(ty) and random.random() < self.use_forward_queue_chance:
+            ty_hash = tvm.ir.structural_hash(ty)
+            _, _, op_info = self.forward_queue[ty_hash]
+            return op_info
         return random.choice(self.supported_ops(ty))
 
     def generate_literal(self, ty, own_name=None):
@@ -301,6 +335,16 @@ class TestExprGenerator(FuelDriver):
             for arg_ty in inst_ft.arg_types
         ])
 
+    def generate_forward_call(self, ty):
+        # take a call out of the forward queue!
+        ty_hash = tvm.ir.structural_hash(ty)
+        arg_types, params, op_info = self.forward_queue[ty_hash]
+        return op_info.produce_call([
+            self.generate_expr(arg_ty)
+            for arg_ty in arg_types
+        ], additional_params=params)
+
+
     def generate_connective(self, ty):
         # see if we can get a global function with the right return type
         if random.random() < self.global_var_chance:
@@ -333,6 +377,9 @@ class TestExprGenerator(FuelDriver):
         self.decrease_fuel()
         if self.fuel == 0:
             return self.generate_literal(ty, own_name=own_name)
+        if (self.hit_forward_queue(ty)
+            and random.random() < self.use_forward_queue_chance):
+            return self.generate_forward_call(ty)
         if random.random() < self.literal_chance:
             return self.generate_literal(ty, own_name=own_name)
         return self.generate_connective(ty)
@@ -357,7 +404,7 @@ def validate_config(config):
     "seed": The value for the random seed, if set to use (default: 0)
     "exclude_main": Whether to exclude the "main" variable from appearing in a generated expression.
                     This can lead to problems if reusing preludes (default: True)
-    "use_forward_solver": Unused for now, will control forward solving when implemented (default: True)
+    "use_forward_solving": Whether to use forward solving (sample operators to skew generator towards producing operators) (default: True)
     "fuel": Fuel parameter to control the size of generated expressions (default: 10)
     "type_fuel": Fuel parameter to control the size of generated types (default: fuel)
                  Recommendation: This should probably be lower than the general fuel,
@@ -404,9 +451,14 @@ def validate_config(config):
             # operators that can return any nonscalar tensor
             self.all_nonscalar_ops = self.basic_tensor_ops + [ctor(max_dim, solver)
                                                               for ctor in ALL_NONSCALAR_OPS]
-            self.rank_3_ops = self.all_nonscalar_ops + [BatchMatmulInfo(max_dim, solver)]
-            self.rank_4_ops = self.all_nonscalar_ops + [Conv2DInfo(max_dim, solver)]
+            batch_matmul_info = BatchMatmulInfo(max_dim, solver)
+            conv2d_info = Conv2DInfo(max_dim, solver)
+            self.rank_3_ops = self.all_nonscalar_ops + [batch_matmul_info]
+            self.rank_4_ops = self.all_nonscalar_ops + [conv2d_info]
             self.batch_norm_info = BatchNormInfo(max_dim, solver)
+            self.all_ops = self.all_nonscalar_ops + [
+                batch_matmul_info, conv2d_info, self.batch_norm_info
+            ]
 
         def set_seeds(self):
             if not self.set_seed:

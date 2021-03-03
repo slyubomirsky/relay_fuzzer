@@ -1,3 +1,5 @@
+import time
+
 import tvm
 from tvm import relay
 
@@ -35,10 +37,9 @@ def generate_expr(prelude, ty, seed):
 
 # we should try finer-grained tests than only this
 def test_fuzz():
-    import time
+    prelude = relay.prelude.Prelude()
 
     for i in range(NUM_ATTEMPTS):
-        prelude = relay.prelude.Prelude()
         start = time.time()
         ty = generate_type(prelude)
         expr = generate_expr(prelude, ty, i)
@@ -46,6 +47,22 @@ def test_fuzz():
         end = time.time()
         print(f"Iter time: {end - start}")
 
+def test_fuzz_forward_solve():
+    # see if forward solving first gets us more operators
+    prelude = relay.prelude.Prelude()
+    for i in range(NUM_ATTEMPTS):
+        start = time.time()
+        gen = TestExprGenerator(prelude)
+        gen.set_seed(i)
+        ty = gen.forward_solve()
+        expr = gen.generate_expr(ty)
+        if gen.get_solver_profile():
+            print(gen.get_solver_profile())
+        check_well_formed(prelude, expr, ty)
+        end = time.time()
+        print(f"Iter time: {end - start}")
+
 
 if __name__ == "__main__":
     test_fuzz()
+    test_fuzz_forward_solve()
