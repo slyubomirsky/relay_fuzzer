@@ -4,6 +4,7 @@ import tvm
 from tvm import relay
 
 from shared_test_generators import TestTypeGenerator, TestExprGenerator
+from miniprelude import MiniPrelude
 
 NUM_ATTEMPTS = 100
 
@@ -45,7 +46,7 @@ def generate_with_forward_solver(prelude, seed, conf=None):
 
 # we should try finer-grained tests than only this
 def test_fuzz():
-    prelude = relay.prelude.Prelude()
+    prelude = MiniPrelude()
 
     for i in range(NUM_ATTEMPTS):
         start = time.time()
@@ -57,7 +58,7 @@ def test_fuzz():
 
 def test_fuzz_forward_solve():
     # see if forward solving first gets us more operators
-    prelude = relay.prelude.Prelude()
+    prelude = MiniPrelude()
     for i in range(NUM_ATTEMPTS):
         start = time.time()
         generate_with_forward_solver(prelude, i)
@@ -66,7 +67,7 @@ def test_fuzz_forward_solve():
 
 
 def test_fuzz_forward_sampling():
-    prelude = relay.prelude.Prelude()
+    prelude = MiniPrelude()
     conf = {"use_forward_sampling": True}
     for i in range(NUM_ATTEMPTS):
         start = time.time()
