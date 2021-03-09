@@ -4,9 +4,10 @@ import tvm
 from tvm import relay
 
 from shared_test_generators import TestTypeGenerator, TestExprGenerator
+from expr_count import count_exprs
 from miniprelude import MiniPrelude
 
-NUM_ATTEMPTS = 100
+NUM_ATTEMPTS = 10
 
 def check_well_formed(prelude, expr, ty):
     assert relay.analysis.well_formed(expr)
@@ -31,6 +32,7 @@ def generate_expr(prelude, ty, seed):
     gen = TestExprGenerator(prelude)
     gen.set_seed(seed)
     ret = gen.generate_expr(ty)
+    print(count_exprs(ret))
     if gen.get_solver_profile():
         print(gen.get_solver_profile())
     return ret
@@ -40,6 +42,7 @@ def generate_with_forward_solver(prelude, seed, conf=None):
     gen.set_seed(seed)
     ty = gen.forward_solve()
     expr = gen.generate_expr(ty)
+    print(count_exprs(expr))
     if gen.get_solver_profile():
         print(gen.get_solver_profile())
     check_well_formed(prelude, expr, ty)
