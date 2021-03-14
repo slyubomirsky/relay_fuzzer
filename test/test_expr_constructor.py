@@ -7,7 +7,7 @@ from shared_test_generators import TestTypeGenerator, TestExprGenerator
 from expr_count import count_exprs
 from miniprelude import MiniPrelude
 
-NUM_ATTEMPTS = 10
+NUM_ATTEMPTS = 100
 
 def check_well_formed(prelude, expr, ty):
     assert relay.analysis.well_formed(expr)
@@ -79,7 +79,21 @@ def test_fuzz_forward_sampling():
         print(f"Iter time: {end - start}")
 
 
+def test_no_solver():
+    prelude = MiniPrelude()
+    conf = {
+        "use_backward_solving": False,
+        "use_forward_sampling": True
+    }
+    for i in range(NUM_ATTEMPTS):
+        start = time.time()
+        generate_with_forward_solver(prelude, i, conf=conf)
+        end = time.time()
+        print(f"Iter time: {end - start}")
+
+
 if __name__ == "__main__":
     test_fuzz()
     test_fuzz_forward_solve()
     test_fuzz_forward_sampling()
+    test_no_solver()

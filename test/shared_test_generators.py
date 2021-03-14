@@ -267,7 +267,11 @@ class TestExprGenerator(FuelDriver):
         return TestPatternGenerator(self.var_scope, self.prelude).generate_patterns(ty)
 
     def generate_op(self, ty):
-        if self.hit_forward_queue(ty) and random.random() < self.use_forward_queue_chance:
+        if (self.hit_forward_queue(ty)
+            # if we don't permit backward solving,
+            # we MUST use the forward queue
+            and (not self.config.use_backward_solving
+                 or random.random() < self.use_forward_queue_chance)):
             ty_hash = tvm.ir.structural_hash(ty)
             _, _, op_info = self.forward_queue[ty_hash]
             return op_info
@@ -365,7 +369,10 @@ class TestExprGenerator(FuelDriver):
         # constructs available only for some types
         if ty == relay.TupleType([]) and random.random() < self.ref_write_chance:
             choices.append(self.expr_ctor.construct_ref_write)
-        if self.has_available_op_calls(ty):
+        if (self.has_available_op_calls(ty)
+            # have to produce a valid op call either
+            # by backward solving or checking the forward queue
+            and (self.config.use_backward_solving or self.hit_forward_queue(ty))):
             # dumb way of skewing the choice
             if random.random() < self.operator_chance:
                 return self.expr_ctor.construct_op_call(ty)
@@ -406,6 +413,7 @@ def validate_config(config):
     "seed": The value for the random seed, if set to use (default: 0)
     "exclude_main": Whether to exclude the "main" variable from appearing in a generated expression.
                     This can lead to problems if reusing preludes (default: True)
+    "use_backward_solving": Whether to permit backward solving (using the solver to find operator calls that satisfy a type) (default: True)
     "use_forward_solving": Whether to use forward solving (sample operators to skew generator towards producing operators) (default: True)
     "use_forward_sampling": Whether to apply forward solving by randomly sampling _without using a solver_ (default: False)
     "fuel": Fuel parameter to control the size of generated expressions (default: 10)
@@ -501,6 +509,8 @@ def validate_config(config):
     set_field(ret, config, "random_seed", 0, lambda i: isinstance(i, int))
     set_field(ret, config, "exclude_main", True, is_bool)
 
+
+    set_field(ret, config, "use_backward_solving", True, is_bool)
     set_field(ret, config, "use_forward_solving", True, is_bool)
     set_field(ret, config, "use_forward_sampling", False, is_bool)
 
