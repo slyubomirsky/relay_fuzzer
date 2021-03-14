@@ -1046,8 +1046,8 @@ class Conv2DRelation(Relation):
         C_out = random.randint(1, self.max_dim)
         H_in = random.randint(1, self.max_dim)
         W_in = random.randint(1, self.max_dim)
-        k_h = random.randint(1, self.max_dim)
-        k_w = random.randint(1, self.max_dim)
+        k_h = random.randint(1, H_in)
+        k_w = random.randint(1, W_in)
         H_out = H_in - (k_h - 1)
         W_out = W_in - (k_w - 1)
 
