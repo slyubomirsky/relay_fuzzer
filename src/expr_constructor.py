@@ -70,11 +70,11 @@ class ExprConstructor:
 
     def construct_let_expr(self, ret_type):
         # handling recursive function definitions is tricky
-        binder_type = self.generate_type()
+        binder_ty = self.generate_type()
         identifier = self.var_scope.new_local_var(binder_ty, add_to_scope=False)
         with self.var_scope.new_scope():
             own_name = None
-            if isinstance(binder_ty, relay.FunctionType):
+            if isinstance(binder_ty, relay.FuncType):
                 own_name = identifier
             binder_expr = self.generate_expr(binder_ty, own_name=own_name)
         with self.var_scope.new_scope():

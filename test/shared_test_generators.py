@@ -363,7 +363,8 @@ class TestExprGenerator(FuelDriver):
             lambda: self.expr_ctor.construct_function_call(ty),
             lambda: self.expr_ctor.construct_match(ty),
             lambda: self.expr_ctor.construct_if_branch(ty),
-            lambda: self.expr_ctor.construct_tuple_index(ty, random.randint(0, self.config.max_arity-1))
+            lambda: self.expr_ctor.construct_tuple_index(ty, random.randint(0, self.config.max_arity-1)),
+            lambda: self.expr_ctor.construct_let_expr(ty)
         ]
 
         # constructs available only for some types
